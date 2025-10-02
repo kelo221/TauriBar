@@ -111,11 +111,14 @@ function handleSongClick(song: AudioFile) {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--playlist-bg);
+  background: var(--bg);
   color: var(--text);
   font-weight: 600;
   text-align: left;
-  border-bottom: 1px solid var(--border-dark);
+  /* bevelled header to separate from rows */
+  border: 1px solid;
+  border-color: var(--border-light) var(--border-dark) var(--border-dark)
+    var(--border-light);
 }
 
 .col-header .header-inner {
@@ -123,6 +126,11 @@ function handleSongClick(song: AudioFile) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* subtle hover to indicate sortability */
+.col-header:hover {
+  background: var(--secondary-bg);
 }
 
 .col-track { width: 80px; }

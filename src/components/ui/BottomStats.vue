@@ -1,14 +1,54 @@
 ﻿<script setup lang="ts">
 import {useStatStore} from "../../stores/statStore";
-import {computed} from "vue";
+import {computed, onMounted, onBeforeUnmount} from "vue";
+import { invoke } from '@tauri-apps/api/core'
 
 const statStore = useStatStore();
 const currentBottomStats = computed(() => statStore.stats);
+
+const displayLine = computed(() => {
+  const s = currentBottomStats.value
+  if (!s) return ''
+  if (s.playtime === 'Playback stopped') return 'Playback stopped'
+  const parts = [s.codec, s.bitrate, s.frequency, s.channelType, s.playtime]
+    .filter((p) => !!p && String(p).trim() !== '')
+  return parts.join(' | ')
+})
+
+let timer: number | null = null
+
+async function pollStats() {
+  try {
+    const st = await invoke<{ position_seconds: number; duration_seconds: number; is_playing: boolean; codec: string; bitrate_kbps: number; sample_rate_hz: number; channels: number; finished: boolean }>('get_playback_state')
+    const pos = Math.max(0, Math.floor(st.position_seconds || 0))
+    const dur = Math.max(0, Math.floor(st.duration_seconds || 0))
+    const mmss = (s: number) => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`
+    const playtime = dur > 0 ? `${mmss(pos)} / ${mmss(dur)}` : (st.is_playing ? '' : 'Playback stopped')
+    const codec = st.codec || ''
+    const bitrate = st.bitrate_kbps ? `${st.bitrate_kbps} kbps` : ''
+    const frequency = st.sample_rate_hz ? `${st.sample_rate_hz} Hz` : ''
+    const channelType = st.channels ? (st.channels === 1 ? 'mono' : 'stereo') : ''
+    statStore.setStats({ codec, bitrate, frequency, channelType, playtime })
+  } catch (e) {
+    // ignore
+  }
+}
+
+onMounted(() => {
+  timer = window.setInterval(pollStats, 500) as unknown as number
+})
+
+onBeforeUnmount(() => {
+  if (timer !== null) {
+    window.clearInterval(timer as unknown as number)
+    timer = null
+  }
+})
 </script>
 
 <template>
   <footer class="statusbar">
-    <span>{{ currentBottomStats.codec }} | {{ currentBottomStats.bitrate }} | {{ currentBottomStats.frequency }} | {{ currentBottomStats.channelType }} | {{ currentBottomStats.playtime }}</span>
+    <span>{{ displayLine }}</span>
   </footer>
 </template>
 

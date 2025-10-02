@@ -27,12 +27,15 @@ function PlayPausePlayback() {
 }
 
 function PlayPrevious() {
- // Greet("test");
   console.log("Playing previous song");
+  const playlist = usePlaylistStore()
+  playlist.playPrevious()
 }
 
 function PlayNext() {
   console.log("Playing next song");
+  const playlist = usePlaylistStore()
+  playlist.playNext()
 }
 
 function PlayRandom() {

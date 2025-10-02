@@ -6,7 +6,8 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc,
+    sync::{mpsc, Arc, Mutex},
+    time::{Duration, Instant},
 };
 use once_cell::sync::OnceCell;
 use rodio::{Decoder, OutputStream, Sink};
@@ -118,6 +119,30 @@ fn ffprobe_duration(path: &Path) -> Option<String> {
     None
 }
 
+fn ffprobe_duration_seconds(path: &Path) -> Option<f64> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            path.as_os_str().to_string_lossy().as_ref(),
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = stdout.trim();
+    if value.is_empty() {
+        return None;
+    }
+    value.parse::<f64>().ok()
+}
+
 fn ffprobe_tags(path: &Path) -> Option<(String, String)> {
     println!("[backend] ffprobe_tags for {}", path.to_string_lossy());
     let output = Command::new("ffprobe")
@@ -198,13 +223,85 @@ fn ffprobe_tags(path: &Path) -> Option<(String, String)> {
     }
 }
 
+fn ffprobe_stream_info(path: &Path) -> Option<(String, u32, u32, u32)> {
+    // Returns (codec_display, bitrate_kbps, sample_rate_hz, channels)
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,bit_rate,channels,sample_rate",
+            "-of",
+            "json",
+            path.as_os_str().to_string_lossy().as_ref(),
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let streams = value.get("streams")?.as_array()?;
+    let s = streams.first()?.as_object()?;
+    let codec_name = s.get("codec_name").and_then(|v| v.as_str()).unwrap_or("");
+    let bit_rate = s.get("bit_rate").and_then(|v| v.as_str()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let channels = s.get("channels").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let sample_rate = s.get("sample_rate").and_then(|v| v.as_str()).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    // Pretty codec display
+    let codec_display = if codec_name.is_empty() { String::new() } else {
+        let mut c = codec_name.to_string();
+        if let Some(first) = c.get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
+        c
+    };
+    let kbps = (bit_rate / 1000) as u32;
+    Some((codec_display, kbps, sample_rate, channels))
+}
+
 enum PlayerCommand {
     Play(String),
     Toggle,
     Stop,
+    SetVolume(f32),
+    SeekTo(f64),
 }
 
 static AUDIO_SENDER: OnceCell<mpsc::Sender<PlayerCommand>> = OnceCell::new();
+static PLAYBACK_STATE: OnceCell<Arc<Mutex<PlaybackState>>> = OnceCell::new();
+
+#[derive(Debug, Default)]
+struct PlaybackState {
+    duration_seconds: Option<f64>,
+    started_at: Option<Instant>,
+    accumulated_pause: Duration,
+    paused_at: Option<Instant>,
+    is_playing: bool,
+    current_path: Option<String>,
+    codec: Option<String>,
+    bitrate_kbps: Option<u32>,
+    sample_rate_hz: Option<u32>,
+    channels: Option<u32>,
+    finished: bool,
+}
+
+#[derive(Serialize)]
+struct FrontendPlaybackState {
+    position_seconds: f64,
+    duration_seconds: f64,
+    is_playing: bool,
+    codec: String,
+    bitrate_kbps: u32,
+    sample_rate_hz: u32,
+    channels: u32,
+    finished: bool,
+}
+
+fn playback_state() -> &'static Arc<Mutex<PlaybackState>> {
+    PLAYBACK_STATE.get_or_init(|| Arc::new(Mutex::new(PlaybackState::default())))
+}
 
 fn ffmpeg_decode_to_wav(input: &Path) -> Result<(TempDir, PathBuf), String> {
     println!(
@@ -252,6 +349,49 @@ fn ffmpeg_decode_to_wav(input: &Path) -> Result<(TempDir, PathBuf), String> {
     Ok((dir, output))
 }
 
+fn ffmpeg_decode_to_wav_with_offset(input: &Path, start_seconds: f64) -> Result<(TempDir, PathBuf), String> {
+    println!(
+        "[backend] ffmpeg_decode_to_wav_with_offset input={} offset={}",
+        input.to_string_lossy(),
+        start_seconds
+    );
+    let dir = tempfile::tempdir().map_err(|e| format!("tempdir error: {}", e))?;
+    let output = dir.path().join("decoded.wav");
+
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-v",
+            "error",
+            "-ss",
+        ])
+        .arg(format!("{}", start_seconds))
+        .args(["-i"])
+        .arg(input.as_os_str())
+        .args(["-f", "wav", "-ac", "2", "-ar", "48000"])
+        .arg(&output)
+        .status()
+        .map_err(|e| {
+            format!(
+                "failed to run ffmpeg (seek): {}. Ensure ffmpeg is installed and on PATH.",
+                e
+            )
+        })?;
+
+    if !status.success() {
+        eprintln!(
+            "[backend] ffmpeg (seek) exited with failure for {}",
+            input.to_string_lossy()
+        );
+        return Err("ffmpeg failed to decode audio (seek)".to_string());
+    }
+    println!(
+        "[backend] ffmpeg (seek) decode success -> {}",
+        output.to_string_lossy()
+    );
+    Ok((dir, output))
+}
+
 fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
     let (tx, rx) = mpsc::channel::<PlayerCommand>();
     std::thread::spawn(move || {
@@ -268,6 +408,8 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
 
         let mut current_sink: Option<Sink> = None;
         let mut _current_decoded_dir: Option<TempDir> = None;
+        let mut current_input_path: Option<PathBuf> = None;
+        let mut current_volume: f32 = 1.0;
 
         while let Ok(cmd) = rx.recv() {
             match cmd {
@@ -301,9 +443,39 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                             Ok(sink) => {
                                 sink.append(source);
                                 sink.play();
+                                sink.set_volume(current_volume);
                                 current_sink = Some(sink);
                                 _current_decoded_dir = Some(dir);
+                                current_input_path = Some(input_path);
                                 println!("[backend] playback started");
+                                // Update playback state
+                                {
+                                    let mut st = playback_state().lock().unwrap();
+                                    st.started_at = Some(Instant::now());
+                                    st.accumulated_pause = Duration::from_millis(0);
+                                    st.paused_at = None;
+                                    st.is_playing = true;
+                                    st.current_path = Some(path.clone());
+                                }
+                                // Gather metadata without holding the lock
+                                let meta_duration = ffprobe_duration_seconds(Path::new(&path));
+                                let meta_stream = ffprobe_stream_info(Path::new(&path));
+                                {
+                                    let mut st = playback_state().lock().unwrap();
+                                    st.duration_seconds = meta_duration;
+                                    if let Some((codec, kbps, sr, ch)) = meta_stream {
+                                        st.codec = Some(codec);
+                                        st.bitrate_kbps = Some(kbps);
+                                        st.sample_rate_hz = Some(sr);
+                                        st.channels = Some(ch);
+                                    } else {
+                                        st.codec = None;
+                                        st.bitrate_kbps = None;
+                                        st.sample_rate_hz = None;
+                                        st.channels = None;
+                                    }
+                                    st.finished = false;
+                                }
                             }
                             Err(e) => {
                                 eprintln!("failed to create sink: {}", e);
@@ -319,9 +491,17 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                         if sink.is_paused() {
                             println!("[backend] resuming playback");
                             sink.play();
+                            let mut st = playback_state().lock().unwrap();
+                            if let Some(paused_at) = st.paused_at.take() {
+                                st.accumulated_pause += Instant::now() - paused_at;
+                            }
+                            st.is_playing = true;
                         } else {
                             println!("[backend] pausing playback");
                             sink.pause();
+                            let mut st = playback_state().lock().unwrap();
+                            st.paused_at = Some(Instant::now());
+                            st.is_playing = false;
                         }
                     } else {
                         println!("[backend] toggle requested but no current sink");
@@ -334,6 +514,78 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                         println!("[backend] playback stopped");
                     }
                     _current_decoded_dir = None;
+                    current_input_path = None;
+                    let mut st = playback_state().lock().unwrap();
+                    st.started_at = None;
+                    st.accumulated_pause = Duration::from_millis(0);
+                    st.paused_at = None;
+                    st.is_playing = false;
+                    st.current_path = None;
+                    st.duration_seconds = None;
+                    st.codec = None;
+                    st.bitrate_kbps = None;
+                    st.sample_rate_hz = None;
+                    st.channels = None;
+                    st.finished = true;
+                }
+                PlayerCommand::SetVolume(vol) => {
+                    println!("[backend] received SetVolume {}", vol);
+                    current_volume = vol.max(0.0);
+                    if let Some(sink) = current_sink.as_ref() {
+                        sink.set_volume(current_volume);
+                    }
+                }
+                PlayerCommand::SeekTo(sec) => {
+                    println!("[backend] received SeekTo {}s", sec);
+                    if let Some(input_path) = current_input_path.as_ref() {
+                        let duration_limit = playback_state().lock().unwrap().duration_seconds;
+                        let target_sec = if let Some(d) = duration_limit { sec.max(0.0).min(d - 0.001) } else { sec.max(0.0) };
+                        if let Some(s) = current_sink.take() {
+                            s.stop();
+                            println!("[backend] stopped sink before seek");
+                        }
+                        _current_decoded_dir = None;
+                        if let Ok((dir, wav_path)) = ffmpeg_decode_to_wav_with_offset(input_path, target_sec) {
+                            let file = match std::fs::File::open(&wav_path) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    eprintln!("failed to open decoded file (seek): {}", e);
+                                    continue;
+                                }
+                            };
+                            let reader = BufReader::new(file);
+                            let source = match Decoder::new(reader) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    eprintln!("failed to decode WAV for playback (seek): {}", e);
+                                    continue;
+                                }
+                            };
+                            match Sink::try_new(&handle) {
+                                Ok(sink) => {
+                                    sink.append(source);
+                                    sink.play();
+                                    sink.set_volume(current_volume);
+                                    current_sink = Some(sink);
+                                    _current_decoded_dir = Some(dir);
+                                    println!("[backend] playback started after seek");
+                                    let mut st = playback_state().lock().unwrap();
+                                    st.started_at = Some(Instant::now() - Duration::from_secs_f64(target_sec));
+                                    st.accumulated_pause = Duration::from_millis(0);
+                                    st.paused_at = None;
+                                    st.is_playing = true;
+                                    st.finished = false;
+                                }
+                                Err(e) => {
+                                    eprintln!("failed to create sink (seek): {}", e);
+                                }
+                            }
+                        } else {
+                            eprintln!("ffmpeg failed to decode audio for seek");
+                        }
+                    } else {
+                        println!("[backend] SeekTo requested but no current input path");
+                    }
                 }
             }
         }
@@ -351,6 +603,16 @@ fn play_audio(path: String) -> Result<(), String> {
     if !Path::new(&path).exists() {
         eprintln!("[backend] file does not exist: {}", path);
         return Err("file does not exist".into());
+    }
+    // Update duration and reset timeline state
+    {
+        let mut st = playback_state().lock().unwrap();
+        st.duration_seconds = ffprobe_duration_seconds(Path::new(&path));
+        st.started_at = Some(Instant::now());
+        st.accumulated_pause = Duration::from_millis(0);
+        st.paused_at = None;
+        st.is_playing = true;
+        st.current_path = Some(path.clone());
     }
     audio_sender()
         .send(PlayerCommand::Play(path))
@@ -371,6 +633,61 @@ fn stop_audio() -> Result<(), String> {
     audio_sender()
         .send(PlayerCommand::Stop)
         .map_err(|e| format!("failed to send stop command: {}", e))
+}
+
+#[tauri::command]
+fn set_volume(volume: f32) -> Result<(), String> {
+    println!("[backend] set_volume invoked: {}", volume);
+    audio_sender()
+        .send(PlayerCommand::SetVolume(volume))
+        .map_err(|e| format!("failed to send set_volume command: {}", e))
+}
+
+#[tauri::command]
+fn seek_to(seconds: f64) -> Result<(), String> {
+    println!("[backend] seek_to invoked: {}s", seconds);
+    // Clamp on the way in to avoid no-op seeks beyond duration
+    let target = {
+        let st = playback_state().lock().unwrap();
+        if let Some(d) = st.duration_seconds {
+            seconds.max(0.0).min((d - 0.001).max(0.0))
+        } else {
+            seconds.max(0.0)
+        }
+    };
+    audio_sender()
+        .send(PlayerCommand::SeekTo(target))
+        .map_err(|e| format!("failed to send seek_to command: {}", e))
+}
+
+#[tauri::command]
+fn get_playback_state() -> Result<FrontendPlaybackState, String> {
+    let st = playback_state().lock().unwrap();
+    let duration = st.duration_seconds.unwrap_or(0.0);
+    let mut position = 0.0;
+    if let Some(started) = st.started_at {
+        let mut now_pos = (Instant::now() - started).as_secs_f64();
+        if !st.is_playing {
+            if let Some(paused_at) = st.paused_at {
+                now_pos = (paused_at - started).as_secs_f64();
+            }
+        }
+        let paused_total = st.accumulated_pause.as_secs_f64();
+        position = (now_pos - paused_total).max(0.0);
+    }
+    if duration > 0.0 {
+        position = position.min(duration);
+    }
+    Ok(FrontendPlaybackState {
+        position_seconds: position,
+        duration_seconds: duration,
+        is_playing: st.is_playing,
+        codec: st.codec.clone().unwrap_or_default(),
+        bitrate_kbps: st.bitrate_kbps.unwrap_or(0),
+        sample_rate_hz: st.sample_rate_hz.unwrap_or(0),
+        channels: st.channels.unwrap_or(0),
+        finished: st.finished,
+    })
 }
 
 #[tauri::command]
@@ -423,7 +740,10 @@ pub fn run() {
             list_media_files,
             play_audio,
             toggle_play_pause,
-            stop_audio
+            stop_audio,
+            set_volume,
+            seek_to,
+            get_playback_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -79,5 +79,29 @@ export const usePlaylistStore = defineStore('playlists',
       }
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, lastPlayedSongId, playSong, playSelected }
+    function playNext() {
+      const list = currentPlayList.value.songs
+      if (!list || list.length === 0) return
+      const currentId = selectedSong.value?.id
+      const idx = currentId ? list.findIndex(s => s.id === currentId) : -1
+      const nextIndex = idx >= 0 ? (idx + 1) % list.length : 0
+      const next = list[nextIndex]
+      if (next) {
+        playSong(next)
+      }
+    }
+
+    function playPrevious() {
+      const list = currentPlayList.value.songs
+      if (!list || list.length === 0) return
+      const currentId = selectedSong.value?.id
+      const idx = currentId ? list.findIndex(s => s.id === currentId) : -1
+      const prevIndex = idx >= 0 ? (idx - 1 + list.length) % list.length : 0
+      const prev = list[prevIndex]
+      if (prev) {
+        playSong(prev)
+      }
+    }
+
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
   })

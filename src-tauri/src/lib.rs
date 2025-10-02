@@ -6,7 +6,7 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
     process::Command,
-    sync::{mpsc, Arc, Mutex},
+    sync::{mpsc::{self, RecvTimeoutError}, Arc, Mutex},
     time::{Duration, Instant},
 };
 use once_cell::sync::OnceCell;

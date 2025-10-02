@@ -12,6 +12,7 @@ const isDragging = ref(false)
 // Backend-derived state
 const durationSeconds = ref(0)
 const isPlaying = ref(false)
+const autoAdvancing = ref(false)
 
 const playlist = usePlaylistStore()
 const { lastPlayedSongId } = storeToRefs(playlist)
@@ -19,7 +20,7 @@ let timer: number | null = null
 
 async function pollState() {
   try {
-    const st = await invoke<{ position_seconds: number; duration_seconds: number; is_playing: boolean; finished: boolean }>('get_playback_state')
+    const st = await invoke<{ position_seconds: number; duration_seconds: number; is_playing: boolean }>('get_playback_state')
     durationSeconds.value = st.duration_seconds || 0
     isPlaying.value = !!st.is_playing
     if (!isDragging.value && durationSeconds.value > 0) {
@@ -27,12 +28,18 @@ async function pollState() {
       const ratio = Math.max(0, Math.min(1, st.position_seconds / durationSeconds.value))
       progress.value = Math.round(ratio * sliderMax)
     }
-    // Auto-advance when finished and not playing
-    if (st.finished && !st.is_playing) {
-      const { playNext } = playlist
-      if (typeof playNext === 'function') {
-        playNext()
+    // Auto-advance when we reach the end (position ~ duration), with guard
+    if (durationSeconds.value > 0 && st.position_seconds >= (durationSeconds.value - 0.1)) {
+      if (!autoAdvancing.value) {
+        autoAdvancing.value = true
+        const { playNext } = playlist
+        if (typeof playNext === 'function') {
+          playNext()
+        }
       }
+    } else {
+      // Reset guard while not at end
+      autoAdvancing.value = false
     }
   } catch (e) {
     // ignore transient errors

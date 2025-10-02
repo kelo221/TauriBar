@@ -1,5 +1,6 @@
 ﻿import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 export const usePlaylistStore = defineStore('playlists',
   () => {
@@ -29,6 +30,30 @@ export const usePlaylistStore = defineStore('playlists',
 
     const selectedSong = ref<AudioFile>()
 
+    async function loadFromBackend() {
+      try {
+        const files = await invoke<Pick<AudioFile, 'id' | 'track' | 'title' | 'artist' | 'album' | 'duration'>[]>("list_media_files")
+        const playlist: Playlist = {
+          id: "testfiles",
+          name: "Test Files",
+          songs: files.map((f, idx) => ({
+            id: f.id ?? String(idx),
+            track: typeof f.track === 'number' ? f.track : Number(f.track) || 0,
+            title: f.title || '',
+            artist: f.artist || '',
+            album: f.album || '',
+            duration: f.duration || '',
+          }))
+        }
+        currentPlayList.value = playlist
+        if (playlist.songs.length > 0) {
+          selectedSong.value = playlist.songs[0]
+        }
+      } catch (e) {
+        console.error('Failed to load media files', e)
+      }
+    }
+
     function setPlaylist(newStats: Playlist) {
       currentPlayList.value = newStats
     }
@@ -37,5 +62,5 @@ export const usePlaylistStore = defineStore('playlists',
       selectedSong.value = newSelection
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong }
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend }
   })

@@ -66,6 +66,7 @@ function handleMiddleClickOnBar(event: MouseEvent) {
 .playlist-body {
   flex: 1;
   min-height: 0;
+  background: var(--playlist-bg);
 }
 
 .cs-tabs {

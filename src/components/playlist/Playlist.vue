@@ -97,19 +97,21 @@ function handleSongClick(song: AudioFile) {
 .playlist-container {
   height: 100%;
   overflow-y: auto;
+  background: var(--playlist-bg);
 }
 
 .playlist-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  background: var(--playlist-bg);
 }
 
 .col-header {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--secondary-bg);
+  background: var(--playlist-bg);
   color: var(--text);
   font-weight: 600;
   text-align: left;
@@ -136,9 +138,10 @@ function handleSongClick(song: AudioFile) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background: var(--playlist-bg);
 }
 
-.row:hover .cell {
+.row:hover:not(.selected) .cell {
   background: rgba(255,255,255,0.04);
 }
 

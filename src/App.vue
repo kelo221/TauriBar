@@ -5,6 +5,14 @@ import VolumeControl from "./components/playback/VolumeControl.vue";
 import ProgressBar from "./components/playback/ProgressBar.vue";
 import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
+import { onMounted } from 'vue';
+import { usePlaylistStore } from './stores/playlistStore';
+
+const playlistStore = usePlaylistStore();
+
+onMounted(() => {
+  playlistStore.loadFromBackend();
+});
 </script>
 
 <template>
@@ -41,6 +49,9 @@ import BottomStats from "./components/ui/BottomStats.vue";
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
 }
 
 .menu-bar {
@@ -67,6 +78,7 @@ import BottomStats from "./components/ui/BottomStats.vue";
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--playlist-bg);
 }
 </style>
 

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent } from 'ag-grid-community'
+import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent, RowDoubleClickedEvent } from 'ag-grid-community'
 import { AgGridVue } from 'ag-grid-vue3'
 import { usePlaylistStore } from '../../stores/playlistStore'
 import { useSearchStore } from '../../stores/searchStore'
+import { invoke } from '@tauri-apps/api/core'
 import 'ag-grid-community/styles/ag-grid.css'
 import 'ag-grid-community/styles/ag-theme-alpine.css'
 
@@ -120,6 +121,12 @@ function onRowClicked(event: RowClickedEvent<AudioFile>) {
   }
 }
 
+function onRowDoubleClicked(event: RowDoubleClickedEvent<AudioFile>) {
+  if (event.data) {
+    playlistStore.playSong(event.data)
+  }
+}
+
 watch(() => playlistStore.selectedSong?.id, (id) => {
   if (!id) {
     gridApi.value?.deselectAll()
@@ -185,6 +192,7 @@ const gridOptions: GridOptions<AudioFile> = {
       :domLayout="'normal'"
       @grid-ready="onGridReady"
       @row-clicked="onRowClicked"
+      @row-double-clicked="onRowDoubleClicked"
     />
   </div>
   

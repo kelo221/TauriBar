@@ -4,17 +4,26 @@ import PlayPreviousButton from "../../components/playback/playbackButtons/PlayPr
 import PlayNextButton from "../../components/playback/playbackButtons/PlayNextButton.vue";
 import PlayRandomButton from "../../components/playback/playbackButtons/PlayRandomButton.vue";
 import PlayStopButton from "../../components/playback/playbackButtons/PlayStopButton.vue";
+import { invoke } from '@tauri-apps/api/core'
+import { usePlaylistStore } from '../../stores/playlistStore'
 
 
 
 function StopPlayback() {
   console.log("Stopping playback");
- // StopRequest();
+  invoke("stop_audio").catch(console.error)
 }
 
 function PlayPausePlayback() {
-  console.log("Pausing playback");
- //PauseRequest();
+  const playlist = usePlaylistStore()
+  const selected = playlist.selectedSong.value
+  // If we have a selected song and it hasn't been played yet, start it
+  if (selected && selected.id && playlist.lastPlayedSongId.value !== selected.id) {
+    playlist.playSelected()
+    return
+  }
+  // Otherwise, toggle pause/play
+  invoke("toggle_play_pause").catch(console.error)
 }
 
 function PlayPrevious() {
@@ -28,7 +37,13 @@ function PlayNext() {
 
 function PlayRandom() {
   console.log("Playing random song");
- // PlayRequest();
+  const playlist = usePlaylistStore()
+  const song = playlist.selectedSong.value
+  if (song && song.id) {
+    invoke("play_audio", { path: song.id }).catch(console.error)
+  } else {
+    console.warn('No selected song to play')
+  }
 }
 
 

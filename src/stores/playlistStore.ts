@@ -29,6 +29,7 @@ export const usePlaylistStore = defineStore('playlists',
     })
 
     const selectedSong = ref<AudioFile>()
+    const lastPlayedSongId = ref<string | null>(null)
 
     async function loadFromBackend() {
       try {
@@ -62,5 +63,21 @@ export const usePlaylistStore = defineStore('playlists',
       selectedSong.value = newSelection
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend }
+    function playSong(song: AudioFile) {
+      selectedSong.value = song
+      if (song && song.id) {
+        invoke('play_audio', { path: song.id }).catch(console.error)
+        lastPlayedSongId.value = song.id
+      }
+    }
+
+    function playSelected() {
+      const song = selectedSong.value
+      if (song && song.id) {
+        invoke('play_audio', { path: song.id }).catch(console.error)
+        lastPlayedSongId.value = song.id
+      }
+    }
+
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, lastPlayedSongId, playSong, playSelected }
   })

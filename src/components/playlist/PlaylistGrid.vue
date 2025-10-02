@@ -3,12 +3,14 @@ import { ref, computed, watch } from 'vue'
 import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent } from 'ag-grid-community'
 import { AgGridVue } from 'ag-grid-vue3'
 import { usePlaylistStore } from '../../stores/playlistStore'
+import { useSearchStore } from '../../stores/searchStore'
 import 'ag-grid-community/styles/ag-grid.css'
 import 'ag-grid-community/styles/ag-theme-alpine.css'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const playlistStore = usePlaylistStore()
+const searchStore = useSearchStore()
 
 const columnDefs = ref<ColDef<AudioFile>[]>([
   { headerName: 'Artist/album', field: 'artist', resizable: true, flex: 1,
@@ -29,6 +31,36 @@ const defaultColDef: ColDef = {
 
 const gridApi = ref<GridApi<AudioFile> | null>(null)
 
+const matchIds = ref<string[]>([])
+const currentMatchIndex = ref<number>(-1)
+
+function dataMatchesQuery(data: AudioFile, q: string): boolean {
+  if (!q) return false
+  const query = q.toLowerCase()
+  const hay = [
+    data.artist ?? '',
+    data.album ?? '',
+    data.title ?? '',
+    String(data.track ?? ''),
+    data.duration ?? ''
+  ].join(' ').toLowerCase()
+  return hay.includes(query)
+}
+
+function recomputeMatches(q: string) {
+  const api = gridApi.value
+  if (!api) return
+  const ids: string[] = []
+  api.forEachNodeAfterFilterAndSort((node) => {
+    const d = node.data
+    if (d && dataMatchesQuery(d, q)) {
+      ids.push(d.id)
+    }
+  })
+  matchIds.value = ids
+  currentMatchIndex.value = ids.length > 0 ? 0 : -1
+}
+
 function selectRowById(id: string) {
   const api = gridApi.value
   if (!api) return
@@ -46,10 +78,40 @@ function selectRowById(id: string) {
   }
 }
 
+function selectRowByIdAndSync(id: string) {
+  const api = gridApi.value
+  if (!api) return
+  let selectedData: AudioFile | null = null
+  api.forEachNode((node) => {
+    const match = node.data && node.data.id === id
+    if (match) {
+      node.setSelected(true, true)
+      api.ensureNodeVisible(node, 'middle')
+      selectedData = node.data as AudioFile
+    }
+  })
+  if (selectedData) {
+    playlistStore.setSelectedSong(selectedData)
+  } else {
+    api.deselectAll()
+  }
+}
+
+function selectMatchAt(index: number) {
+  if (index < 0 || index >= matchIds.value.length) return
+  const id = matchIds.value[index]
+  currentMatchIndex.value = index
+  selectRowByIdAndSync(id)
+}
+
 function onGridReady(event: GridReadyEvent<AudioFile>) {
   gridApi.value = event.api
   const id = playlistStore.selectedSong?.id
   if (id) selectRowById(id)
+  const q = searchStore.query.trim()
+  if (q) {
+    recomputeMatches(q)
+  }
 }
 
 function onRowClicked(event: RowClickedEvent<AudioFile>) {
@@ -64,6 +126,41 @@ watch(() => playlistStore.selectedSong?.id, (id) => {
     return
   }
   selectRowById(id)
+})
+
+watch(() => searchStore.query, (q) => {
+  const query = q.trim()
+  if (!gridApi.value) return
+  if (query === '') {
+    matchIds.value = []
+    currentMatchIndex.value = -1
+    return
+  }
+  recomputeMatches(query)
+  if (matchIds.value.length > 0) {
+    selectMatchAt(0)
+  }
+})
+
+watch(() => searchStore.navToken, () => {
+  const query = searchStore.query.trim()
+  if (!gridApi.value || query === '') return
+  if (matchIds.value.length === 0) {
+    recomputeMatches(query)
+  }
+  if (matchIds.value.length === 0) return
+  const dir = searchStore.navDirection
+  if (currentMatchIndex.value === -1) {
+    selectMatchAt(0)
+    return
+  }
+  let nextIndex = currentMatchIndex.value
+  if (dir === 'next') {
+    nextIndex = (currentMatchIndex.value + 1) % matchIds.value.length
+  } else {
+    nextIndex = (currentMatchIndex.value - 1 + matchIds.value.length) % matchIds.value.length
+  }
+  selectMatchAt(nextIndex)
 })
 
 const gridOptions: GridOptions<AudioFile> = {

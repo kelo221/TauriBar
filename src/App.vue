@@ -5,13 +5,42 @@ import VolumeControl from "./components/playback/VolumeControl.vue";
 import ProgressBar from "./components/playback/ProgressBar.vue";
 import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
-import { onMounted } from 'vue';
+import SearchOverlay from "./components/ui/SearchOverlay.vue";
+import { onMounted, onBeforeUnmount } from 'vue';
 import { usePlaylistStore } from './stores/playlistStore';
+import { useSearchStore } from './stores/searchStore';
 
 const playlistStore = usePlaylistStore();
+const searchStore = useSearchStore();
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  const isCtrlF = (event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F');
+  const isF3 = event.key === 'F3' || event.key === 'F3'.toLowerCase();
+  if (isCtrlF) {
+    event.preventDefault();
+    event.stopPropagation();
+    searchStore.open();
+    return;
+  }
+  if (isF3) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) {
+      searchStore.prev();
+    } else {
+      searchStore.next();
+    }
+    return;
+  }
+}
 
 onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown, { capture: true });
   playlistStore.loadFromBackend();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown, { capture: true } as any);
 });
 </script>
 
@@ -39,6 +68,7 @@ onMounted(() => {
     </div>
 
     <BottomStats />
+    <SearchOverlay />
   </main>
   
 </template>

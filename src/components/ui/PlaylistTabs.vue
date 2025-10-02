@@ -13,7 +13,7 @@
       </template>
     </div>
     <div class="playlist-body">
-      <Playlist />
+      <PlaylistGrid />
     </div>
   </div>
   
@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { useTabStore } from '../../stores/tabStore'
-import Playlist from '../../components/playlist/Playlist.vue'
+import PlaylistGrid from '../../components/playlist/PlaylistGrid.vue'
 
 const tabStore = useTabStore()
 const {
@@ -58,6 +58,7 @@ function handleMiddleClickOnBar(event: MouseEvent) {
 .tabs-wrapper {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
 }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions } from 'ag-grid-community'
+import { ref, computed, watch } from 'vue'
+import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent } from 'ag-grid-community'
 import { AgGridVue } from 'ag-grid-vue3'
 import { usePlaylistStore } from '../../stores/playlistStore'
 import 'ag-grid-community/styles/ag-grid.css'
@@ -27,12 +27,53 @@ const defaultColDef: ColDef = {
   suppressHeaderMenuButton: true,
 }
 
+const gridApi = ref<GridApi<AudioFile> | null>(null)
+
+function selectRowById(id: string) {
+  const api = gridApi.value
+  if (!api) return
+  let found = false
+  api.forEachNode((node) => {
+    const match = node.data && node.data.id === id
+    if (match) {
+      node.setSelected(true, true)
+      api.ensureNodeVisible(node, 'middle')
+      found = true
+    }
+  })
+  if (!found) {
+    api.deselectAll()
+  }
+}
+
+function onGridReady(event: GridReadyEvent<AudioFile>) {
+  gridApi.value = event.api
+  const id = playlistStore.selectedSong?.id
+  if (id) selectRowById(id)
+}
+
+function onRowClicked(event: RowClickedEvent<AudioFile>) {
+  if (event.data) {
+    playlistStore.setSelectedSong(event.data)
+  }
+}
+
+watch(() => playlistStore.selectedSong?.id, (id) => {
+  if (!id) {
+    gridApi.value?.deselectAll()
+    return
+  }
+  selectRowById(id)
+})
+
 const gridOptions: GridOptions<AudioFile> = {
   defaultColDef,
   headerHeight: 24,
   rowHeight: 22,
   suppressDragLeaveHidesColumns: true,
   ensureDomOrder: true,
+  rowSelection: 'single',
+  getRowId: (params) => params.data?.id ?? '',
 }
 
 </script>
@@ -45,6 +86,8 @@ const gridOptions: GridOptions<AudioFile> = {
       :rowData="rowData"
       :gridOptions="gridOptions"
       :domLayout="'normal'"
+      @grid-ready="onGridReady"
+      @row-clicked="onRowClicked"
     />
   </div>
   
@@ -64,7 +107,7 @@ const gridOptions: GridOptions<AudioFile> = {
   --ag-header-foreground-color: var(--text);
   --ag-border-color: var(--border-dark);
   --ag-secondary-border-color: var(--border-light);
-  --ag-row-hover-color: rgba(255,255,255,0.06);
+  --ag-row-hover-color: transparent;
   --ag-selected-row-background-color: #2f362b;
   --ag-odd-row-background-color: var(--playlist-bg);
   --ag-row-border-color: var(--border-dark);
@@ -120,7 +163,7 @@ const gridOptions: GridOptions<AudioFile> = {
   border-right: 1px solid var(--border-dark);
 }
 
-.ag-theme-alpine.cs-theme .ag-row-hover .ag-cell { background: rgba(255,255,255,0.04); }
+.ag-theme-alpine.cs-theme .ag-row-hover .ag-cell { background: var(--playlist-bg); }
 .ag-theme-alpine.cs-theme .ag-row-selected .ag-cell { background: #2f362b; }
 </style>
 

@@ -811,6 +811,7 @@ pub fn run() {
     println!("[backend] Tauri run starting");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
             list_media_files,

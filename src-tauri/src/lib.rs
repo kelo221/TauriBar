@@ -3,15 +3,14 @@ use serde::Serialize;
 use std::{
     ffi::OsStr,
     fs,
-    io::BufReader,
+    io::{self, BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio, Child, ChildStdout},
     sync::{mpsc::{self, RecvTimeoutError}, Arc, Mutex},
     time::{Duration, Instant},
 };
 use once_cell::sync::OnceCell;
-use rodio::{Decoder, OutputStream, Sink};
-use tempfile::TempDir;
+use rodio::{Decoder, OutputStream, Sink, Source};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -303,93 +302,121 @@ fn playback_state() -> &'static Arc<Mutex<PlaybackState>> {
     PLAYBACK_STATE.get_or_init(|| Arc::new(Mutex::new(PlaybackState::default())))
 }
 
-fn ffmpeg_decode_to_wav(input: &Path) -> Result<(TempDir, PathBuf), String> {
+/// Spawns ffmpeg to decode audio to signed 16-bit PCM (s16le), stereo, 48kHz, streamed to stdout.
+fn spawn_ffmpeg_pcm_stream(input: &Path, start_seconds: Option<f64>) -> Result<(Child, ChildStdout), String> {
     println!(
-        "[backend] ffmpeg_decode_to_wav input={}",
-        input.to_string_lossy()
-    );
-    let dir = tempfile::tempdir().map_err(|e| format!("tempdir error: {}", e))?;
-    let output = dir.path().join("decoded.wav");
-
-    // Run ffmpeg to decode to signed 16-bit PCM wav, stereo, 48kHz
-    // Windows users might have ffmpeg.exe in PATH; rely on PATH resolution
-    let status = Command::new("ffmpeg")
-        .args([
-            "-y", // overwrite
-            "-v",
-            "error",
-            "-i",
-        ])
-        .arg(input.as_os_str())
-        .args([
-            "-f",
-            "wav",
-            "-ac",
-            "2",
-            "-ar",
-            "48000",
-        ])
-        .arg(&output)
-        .status()
-        .map_err(|e| {
-            format!(
-                "failed to run ffmpeg: {}. Ensure ffmpeg is installed and on PATH.",
-                e
-            )
-        })?;
-
-    if !status.success() {
-        eprintln!("[backend] ffmpeg exited with failure for {}", input.to_string_lossy());
-        return Err("ffmpeg failed to decode audio".to_string());
-    }
-    println!(
-        "[backend] ffmpeg decode success -> {}",
-        output.to_string_lossy()
-    );
-    Ok((dir, output))
-}
-
-fn ffmpeg_decode_to_wav_with_offset(input: &Path, start_seconds: f64) -> Result<(TempDir, PathBuf), String> {
-    println!(
-        "[backend] ffmpeg_decode_to_wav_with_offset input={} offset={}",
+        "[backend] spawn_ffmpeg_pcm_stream input={} start={:?}",
         input.to_string_lossy(),
         start_seconds
     );
-    let dir = tempfile::tempdir().map_err(|e| format!("tempdir error: {}", e))?;
-    let output = dir.path().join("decoded.wav");
 
-    let status = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-v",
-            "error",
-            "-ss",
-        ])
-        .arg(format!("{}", start_seconds))
-        .args(["-i"])
-        .arg(input.as_os_str())
-        .args(["-f", "wav", "-ac", "2", "-ar", "48000"])
-        .arg(&output)
-        .status()
-        .map_err(|e| {
-            format!(
-                "failed to run ffmpeg (seek): {}. Ensure ffmpeg is installed and on PATH.",
-                e
-            )
-        })?;
-
-    if !status.success() {
-        eprintln!(
-            "[backend] ffmpeg (seek) exited with failure for {}",
-            input.to_string_lossy()
-        );
-        return Err("ffmpeg failed to decode audio (seek)".to_string());
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-v").arg("error");
+    if let Some(ss) = start_seconds {
+        cmd.arg("-ss").arg(format!("{}", ss));
     }
-    println!(
-        "[backend] ffmpeg (seek) decode success -> {}",
-        output.to_string_lossy()
-    );
-    Ok((dir, output))
+    cmd.arg("-i").arg(input.as_os_str());
+    cmd
+        .arg("-f").arg("s16le")
+        .arg("-ac").arg("2")
+        .arg("-ar").arg("48000")
+        .arg("pipe:1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "failed to spawn ffmpeg: {}. Ensure ffmpeg is installed and on PATH.",
+            e
+        )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| "failed to capture ffmpeg stdout".to_string())?;
+    Ok((child, stdout))
+}
+
+/// A rodio Source that yields i16 samples read from a blocking reader of raw s16le PCM data.
+struct PcmStreamSource {
+    reader: BufReader<ChildStdout>,
+    channels: u16,
+    sample_rate: u32,
+    buf: Vec<u8>,
+    buf_pos: usize,
+    ended: bool,
+}
+
+impl PcmStreamSource {
+    fn new(stdout: ChildStdout, channels: u16, sample_rate: u32) -> Self {
+        Self {
+            reader: BufReader::new(stdout),
+            channels,
+            sample_rate,
+            buf: Vec::with_capacity(8192),
+            buf_pos: 0,
+            ended: false,
+        }
+    }
+
+    fn refill_buffer(&mut self) -> io::Result<()> {
+        self.buf.clear();
+        self.buf_pos = 0;
+        // Read a multiple of 2 bytes to align on i16 sample boundaries
+        let mut tmp = [0u8; 8192];
+        let n = self.reader.read(&mut tmp)?;
+        if n == 0 {
+            self.ended = true;
+            return Ok(());
+        }
+        // Ensure even number of bytes for i16
+        let even = n & !1;
+        self.buf.extend_from_slice(&tmp[..even]);
+        Ok(())
+    }
+}
+
+impl Iterator for PcmStreamSource {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ended {
+            return None;
+        }
+        // If buffer exhausted, try to refill
+        if self.buf_pos + 2 > self.buf.len() {
+            if let Err(e) = self.refill_buffer() {
+                eprintln!("[backend] PCM stream read error: {}", e);
+                self.ended = true;
+                return None;
+            }
+            if self.ended {
+                return None;
+            }
+        }
+        // Read little-endian i16
+        let lo = self.buf[self.buf_pos] as u16;
+        let hi = self.buf[self.buf_pos + 1] as u16;
+        self.buf_pos += 2;
+        let sample = ((hi << 8) | lo) as i16;
+        Some(sample)
+    }
+}
+
+impl Source for PcmStreamSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
 }
 
 fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
@@ -407,7 +434,7 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
         let _stream = stream;
 
         let mut current_sink: Option<Sink> = None;
-        let mut _current_decoded_dir: Option<TempDir> = None;
+        let mut current_ffmpeg_child: Option<Child> = None;
         let mut current_input_path: Option<PathBuf> = None;
         let mut current_volume: f32 = 1.0;
 
@@ -420,32 +447,22 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                         s.stop();
                         println!("[backend] stopped previous sink");
                     }
-                    _current_decoded_dir = None;
+                    if let Some(mut ch) = current_ffmpeg_child.take() {
+                        let _ = ch.kill();
+                        let _ = ch.wait();
+                        println!("[backend] killed previous ffmpeg child");
+                    }
 
                     let input_path = PathBuf::from(&path);
-                    if let Ok((dir, wav_path)) = ffmpeg_decode_to_wav(&input_path) {
-                        let file = match std::fs::File::open(&wav_path) {
-                            Ok(f) => f,
-                            Err(e) => {
-                                eprintln!("failed to open decoded file: {}", e);
-                                continue;
-                            }
-                        };
-                        let reader = BufReader::new(file);
-                        let source = match Decoder::new(reader) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("failed to decode WAV for playback: {}", e);
-                                continue;
-                            }
-                        };
+                    if let Ok((child, stdout)) = spawn_ffmpeg_pcm_stream(&input_path, None) {
+                        let source = PcmStreamSource::new(stdout, 2, 48000);
                         match Sink::try_new(&handle) {
                             Ok(sink) => {
                                 sink.append(source);
                                 sink.play();
                                 sink.set_volume(current_volume);
                                 current_sink = Some(sink);
-                                _current_decoded_dir = Some(dir);
+                                current_ffmpeg_child = Some(child);
                                 current_input_path = Some(input_path);
                                 println!("[backend] playback started");
                                 // Update playback state
@@ -482,7 +499,7 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                             }
                         }
                     } else {
-                        eprintln!("ffmpeg failed to decode audio for {}", path);
+                        eprintln!("ffmpeg failed to start stream for {}", path);
                     }
                 }
                 PlayerCommand::Toggle => {
@@ -513,7 +530,10 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                         s.stop();
                         println!("[backend] playback stopped");
                     }
-                    _current_decoded_dir = None;
+                    if let Some(mut ch) = current_ffmpeg_child.take() {
+                        let _ = ch.kill();
+                        let _ = ch.wait();
+                    }
                     current_input_path = None;
                     let mut st = playback_state().lock().unwrap();
                     st.started_at = None;
@@ -544,30 +564,19 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                             s.stop();
                             println!("[backend] stopped sink before seek");
                         }
-                        _current_decoded_dir = None;
-                        if let Ok((dir, wav_path)) = ffmpeg_decode_to_wav_with_offset(input_path, target_sec) {
-                            let file = match std::fs::File::open(&wav_path) {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    eprintln!("failed to open decoded file (seek): {}", e);
-                                    continue;
-                                }
-                            };
-                            let reader = BufReader::new(file);
-                            let source = match Decoder::new(reader) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    eprintln!("failed to decode WAV for playback (seek): {}", e);
-                                    continue;
-                                }
-                            };
+                        if let Some(mut ch) = current_ffmpeg_child.take() {
+                            let _ = ch.kill();
+                            let _ = ch.wait();
+                        }
+                        if let Ok((child, stdout)) = spawn_ffmpeg_pcm_stream(input_path, Some(target_sec)) {
+                            let source = PcmStreamSource::new(stdout, 2, 48000);
                             match Sink::try_new(&handle) {
                                 Ok(sink) => {
                                     sink.append(source);
                                     sink.play();
                                     sink.set_volume(current_volume);
                                     current_sink = Some(sink);
-                                    _current_decoded_dir = Some(dir);
+                                    current_ffmpeg_child = Some(child);
                                     println!("[backend] playback started after seek");
                                     let mut st = playback_state().lock().unwrap();
                                     st.started_at = Some(Instant::now() - Duration::from_secs_f64(target_sec));
@@ -581,7 +590,7 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                                 }
                             }
                         } else {
-                            eprintln!("ffmpeg failed to decode audio for seek");
+                            eprintln!("ffmpeg failed to start stream for seek");
                         }
                     } else {
                         println!("[backend] SeekTo requested but no current input path");

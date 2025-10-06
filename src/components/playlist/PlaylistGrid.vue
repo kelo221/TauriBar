@@ -425,6 +425,9 @@ onBeforeUnmount(() => {
   --ag-row-border-color: var(--border-dark);
   --ag-header-height: 24px;
   --ag-row-height: 22px;
+  /* Hide blue focus border/ring in Alpine theme */
+  --ag-focus-border-color: transparent;
+  --ag-input-focus-border-color: transparent;
 }
 
 .ag-theme-alpine.cs-theme .ag-root-wrapper,
@@ -463,6 +466,18 @@ onBeforeUnmount(() => {
   padding: 1px 4px;
   color: var(--text);
   background: var(--playlist-bg);
+}
+
+/* Remove browser/AG Grid focus outlines to avoid OS blue selection visuals */
+.ag-theme-alpine.cs-theme .ag-cell:focus,
+.ag-theme-alpine.cs-theme .ag-cell:focus-within,
+.ag-theme-alpine.cs-theme .ag-row:focus,
+.ag-theme-alpine.cs-theme .ag-row:focus-within,
+.ag-theme-alpine.cs-theme .ag-root:focus,
+.ag-theme-alpine.cs-theme .ag-cell-focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
 }
 
 /* Column separators to mimic table borders */

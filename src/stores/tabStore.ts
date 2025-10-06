@@ -1,7 +1,8 @@
 ﻿import {defineStore} from 'pinia'
-import {ref, computed} from 'vue'
+import {ref, computed, watch} from 'vue'
 
 export const useTabStore = defineStore('tabs', () => {
+  const STORAGE_KEY = 'tabState'
   const tabs = ref<Tab[]>([
     {
       id: "tab1",
@@ -10,10 +11,38 @@ export const useTabStore = defineStore('tabs', () => {
         title: "Welcome",
         text: "This is the first tab content",
       },
+      playlist: { id: 'empty', name: 'Empty', songs: [] }
     }
   ])
 
   const activeTabIndex = ref(0)
+
+  function restoreFromStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return
+      const savedTabs = Array.isArray(parsed.tabs) ? parsed.tabs as Tab[] : null
+      const savedIndex = Number.isInteger(parsed.activeTabIndex) ? parsed.activeTabIndex as number : 0
+      if (savedTabs && savedTabs.length > 0) {
+        tabs.value = savedTabs
+        activeTabIndex.value = Math.min(Math.max(0, savedIndex), savedTabs.length - 1)
+      }
+    } catch (e) {
+      // ignore corrupt data
+      console.warn('[tabs] failed to restore state', e)
+    }
+  }
+
+  function saveToStorage() {
+    try {
+      const payload = JSON.stringify({ tabs: tabs.value, activeTabIndex: activeTabIndex.value })
+      localStorage.setItem(STORAGE_KEY, payload)
+    } catch (e) {
+      console.warn('[tabs] failed to persist state', e)
+    }
+  }
 
   const activeTab = computed(() => tabs.value[activeTabIndex.value])
 
@@ -25,6 +54,7 @@ export const useTabStore = defineStore('tabs', () => {
         title: "Welcome",
         text: `This is tab ${tabs.value.length + 1} content`,
       },
+      playlist: { id: 'empty', name: 'Empty', songs: [] }
     })
     activeTabIndex.value = tabs.value.length - 1
   }
@@ -54,6 +84,20 @@ export const useTabStore = defineStore('tabs', () => {
     activeTabIndex.value = index
   }
 
+  function setActiveTabPlaylist(pl: Playlist) {
+    const idx = activeTabIndex.value
+    if (idx >= 0 && idx < tabs.value.length) {
+      tabs.value[idx].playlist = pl
+    }
+  }
+
+  // initial restore
+  restoreFromStorage()
+
+  // persist on change
+  watch(tabs, saveToStorage, { deep: true })
+  watch(activeTabIndex, saveToStorage)
+
   return {
     tabs,
     activeTabIndex,
@@ -61,6 +105,7 @@ export const useTabStore = defineStore('tabs', () => {
     createTab,
     removeTab,
     renameTab,
-    setActiveTab
+    setActiveTab,
+    setActiveTabPlaylist
   }
 })

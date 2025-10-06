@@ -6,11 +6,11 @@ use std::{
     io::{self, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio, Child, ChildStdout},
-    sync::{mpsc::{self, RecvTimeoutError}, Arc, Mutex},
+    sync::{mpsc::{self}, Arc, Mutex},
     time::{Duration, Instant},
 };
 use once_cell::sync::OnceCell;
-use rodio::{Decoder, OutputStream, Sink, Source};
+use rodio::{OutputStream, Sink, Source};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -739,6 +739,73 @@ fn list_media_files() -> Result<Vec<FrontendAudioFile>, String> {
     Ok(items)
 }
 
+/// Recursively traverse a directory collecting supported audio files
+fn collect_media_from_dir_recursive(dir: &Path, items: &mut Vec<FrontendAudioFile>) -> Result<(), String> {
+    let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let entries = fs::read_dir(&current).map_err(|e| format!("failed to read dir '{}': {}", current.to_string_lossy(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() && is_supported_audio(&path) {
+                let file_stem = path
+                    .file_stem()
+                    .and_then(OsStr::to_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let (track, title) = parse_track_and_title(&file_stem);
+                let duration = ffprobe_duration(&path).unwrap_or_default();
+                let (artist, album) = ffprobe_tags(&path).unwrap_or((String::new(), String::new()));
+                let id = path.to_string_lossy().to_string();
+                let item = FrontendAudioFile { id, track, title, artist, album, duration };
+                println!("[backend] found media: {}", item.id);
+                items.push(item);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_media_files_from_paths(paths: Vec<String>) -> Result<Vec<FrontendAudioFile>, String> {
+    println!("[backend] list_media_files_from_paths invoked with {} path(s)", paths.len());
+    for p in &paths { println!("[backend] path: {}", p); }
+    let mut items: Vec<FrontendAudioFile> = Vec::new();
+
+    for p in paths {
+        let pb = PathBuf::from(p);
+        if pb.is_dir() {
+            collect_media_from_dir_recursive(&pb, &mut items)?;
+        } else if pb.is_file() {
+            if is_supported_audio(&pb) {
+                let file_stem = pb
+                    .file_stem()
+                    .and_then(OsStr::to_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let (track, title) = parse_track_and_title(&file_stem);
+                let duration = ffprobe_duration(&pb).unwrap_or_default();
+                let (artist, album) = ffprobe_tags(&pb).unwrap_or((String::new(), String::new()));
+                let id = pb.to_string_lossy().to_string();
+                let item = FrontendAudioFile { id, track, title, artist, album, duration };
+                println!("[backend] found media: {}", item.id);
+                items.push(item);
+            } else {
+                println!("[backend] skipped non-audio file: {}", pb.to_string_lossy());
+            }
+        } else {
+            println!("[backend] skipped missing path: {}", pb.to_string_lossy());
+        }
+    }
+
+    // Sort by track then title for a stable order
+    items.sort_by(|a, b| a.track.cmp(&b.track).then_with(|| a.title.cmp(&b.title)));
+    println!("[backend] returning {} media items", items.len());
+    Ok(items)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("[backend] Tauri run starting");
@@ -747,6 +814,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             list_media_files,
+            list_media_files_from_paths,
             play_audio,
             toggle_play_pause,
             stop_audio,

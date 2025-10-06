@@ -36,7 +36,6 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown, { capture: true });
-  playlistStore.loadFromBackend();
 });
 
 onBeforeUnmount(() => {

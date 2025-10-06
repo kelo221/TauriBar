@@ -5,28 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 export const usePlaylistStore = defineStore('playlists',
   () => {
 
-    const currentPlayList = ref<Playlist>({
-      id: "1",
-      name: "My Playlist",
-      songs: [
-        {
-          id: "rsatarstaro",
-          track: 1,
-          title: "Song 1",
-          artist: "Artist 1",
-          album: "Album 1",
-          duration: "3:45",
-        },
-        {
-          id: "arstarst",
-          track: 2,
-          title: "Song 2",
-          artist: "Artist 2",
-          album: "Album 2",
-          duration: "2:50",
-        },
-      ]
-    })
+    const currentPlayList = ref<Playlist>({ id: "empty", name: "Empty", songs: [] })
 
     const selectedSong = ref<AudioFile>()
     const lastPlayedSongId = ref<string | null>(null)
@@ -52,6 +31,35 @@ export const usePlaylistStore = defineStore('playlists',
         }
       } catch (e) {
         console.error('Failed to load media files', e)
+      }
+    }
+
+    async function loadFromPaths(paths: string[], label?: string) {
+      try {
+        console.log('[store] loadFromPaths called with', paths)
+        const files = await invoke<Pick<AudioFile, 'id' | 'track' | 'title' | 'artist' | 'album' | 'duration'>[]>(
+          "list_media_files_from_paths",
+          { paths }
+        )
+        console.log('[store] backend returned', files.length, 'items')
+        const playlist: Playlist = {
+          id: "dropped",
+          name: label || "Dropped",
+          songs: files.map((f, idx) => ({
+            id: f.id ?? String(idx),
+            track: typeof f.track === 'number' ? f.track : Number(f.track) || 0,
+            title: f.title || '',
+            artist: f.artist || '',
+            album: f.album || '',
+            duration: f.duration || '',
+          }))
+        }
+        currentPlayList.value = playlist
+        if (playlist.songs.length > 0) {
+          selectedSong.value = playlist.songs[0]
+        }
+      } catch (e) {
+        console.error('Failed to load media files from paths', e)
       }
     }
 
@@ -103,5 +111,5 @@ export const usePlaylistStore = defineStore('playlists',
       }
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
   })

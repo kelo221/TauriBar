@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent, RowDoubleClickedEvent } from 'ag-grid-community'
 import { AgGridVue } from 'ag-grid-vue3'
 import { usePlaylistStore } from '../../stores/playlistStore'
 import { useSearchStore } from '../../stores/searchStore'
-import { invoke } from '@tauri-apps/api/core'
+import { useTabStore } from '../../stores/tabStore'
+// import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import 'ag-grid-community/styles/ag-grid.css'
 import 'ag-grid-community/styles/ag-theme-alpine.css'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const playlistStore = usePlaylistStore()
+const tabStore = useTabStore()
 const searchStore = useSearchStore()
 
 const columnDefs = ref<ColDef<AudioFile>[]>([
@@ -176,9 +181,114 @@ const gridOptions: GridOptions<AudioFile> = {
   rowHeight: 22,
   suppressDragLeaveHidesColumns: true,
   ensureDomOrder: true,
-  rowSelection: 'single',
+  theme: 'legacy',
+  rowSelection: { mode: 'singleRow', checkboxes: false },
+  suppressRowClickSelection: false,
+  suppressRowDeselection: false,
   getRowId: (params) => params.data?.id ?? '',
 }
+
+// Handle OS-level file/folder drops (Tauri v1/v2 compatible via event API)
+let fileDropUnlisten: UnlistenFn | null = null
+let fileDropHoverUnlisten: UnlistenFn | null = null
+let fileDropCancelledUnlisten: UnlistenFn | null = null
+let fileDropWebviewUnlisten: UnlistenFn | null = null
+
+function setupFileDropHandler() {
+  console.log('[ui] registering tauri file-drop listeners')
+  // v2: preferred API
+  try {
+    const win = getCurrentWebviewWindow()
+    if (win && typeof (win as any).onDragDropEvent === 'function') {
+      ;(win as any).onDragDropEvent(async (event: any) => {
+        console.log('[ui] onDragDropEvent:', event)
+        const payload = event?.payload
+        const type = payload?.type
+        const paths: string[] | undefined = Array.isArray(payload?.paths) ? payload.paths : undefined
+        if (type !== 'drop' || !paths || paths.length === 0) return
+        try {
+          const label = paths.length === 1 ? paths[0].split(/[\\/]/).pop() : `Dropped (${paths.length})`
+          console.log('[ui] loading playlist from dropped paths (onDragDropEvent):', paths)
+          await playlistStore.loadFromPaths(paths, label)
+          // Mirror playlist into active tab so it persists when switching tabs
+          tabStore.setActiveTabPlaylist(playlistStore.currentPlayList)
+        } catch (e) {
+          console.error('Failed to load from dropped paths', e)
+        }
+      }).then((unlisten: UnlistenFn) => { fileDropWebviewUnlisten = unlisten }).catch(() => {})
+    }
+  } catch {}
+  // Drop
+  listen('tauri://file-drop', async (ev) => {
+    console.log('[ui] tauri://file-drop event:', ev)
+    const payload: any = ev.payload as any
+    let paths: string[] | undefined
+    if (Array.isArray(payload)) {
+      // v1: payload is string[]
+      paths = payload as string[]
+    } else if (payload && Array.isArray(payload.paths)) {
+      // v2: payload has shape { type, paths }
+      if (payload.type && payload.type !== 'drop') return
+      paths = payload.paths
+    }
+    if (!paths || paths.length === 0) return
+    try {
+      const label = paths.length === 1 ? paths[0].split(/[\\/]/).pop() : `Dropped (${paths.length})`
+      console.log('[ui] loading playlist from dropped paths:', paths)
+      await playlistStore.loadFromPaths(paths, label)
+      // Mirror playlist into active tab so new tabs can keep their own data if needed later
+      tabStore.setActiveTabPlaylist(playlistStore.currentPlayList)
+    } catch (e) {
+      console.error('Failed to load from dropped paths', e)
+    }
+  }).then((unlisten) => { fileDropUnlisten = unlisten }).catch(() => {})
+
+  // Hover (optional logging)
+  listen('tauri://file-drop-hover', (ev) => {
+    console.log('[ui] tauri://file-drop-hover:', ev)
+  }).then((unlisten) => { fileDropHoverUnlisten = unlisten }).catch(() => {})
+
+  // Cancelled (optional logging)
+  listen('tauri://file-drop-cancelled', (ev) => {
+    console.log('[ui] tauri://file-drop-cancelled:', ev)
+  }).then((unlisten) => { fileDropCancelledUnlisten = unlisten }).catch(() => {})
+}
+
+onMounted(() => {
+  setupFileDropHandler()
+  // Add DOM listeners just to confirm browser-level drop reaches us
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault()
+  })
+  window.addEventListener('drop', (e) => {
+    e.preventDefault()
+    try {
+      const dt = e.dataTransfer
+      if (!dt) return
+      console.log('[ui] DOM drop: files=', dt.files?.length, 'items=', dt.items?.length)
+      const paths: string[] = []
+      // Some environments expose a path on File (not standard). Log it if present.
+      for (let i = 0; i < dt.files.length; i++) {
+        const f: any = dt.files[i]
+        if (f && typeof f.path === 'string') paths.push(f.path)
+      }
+      if (paths.length > 0) {
+        const label = paths.length === 1 ? paths[0].split(/[\\/]/).pop() : `Dropped (${paths.length})`
+        playlistStore.loadFromPaths(paths, label)
+        tabStore.setActiveTabPlaylist(playlistStore.currentPlayList)
+      }
+    } catch (err) {
+      console.error('[ui] DOM drop handler error', err)
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  if (fileDropUnlisten) { try { fileDropUnlisten() } catch {} fileDropUnlisten = null }
+  if (fileDropHoverUnlisten) { try { fileDropHoverUnlisten() } catch {} fileDropHoverUnlisten = null }
+  if (fileDropCancelledUnlisten) { try { fileDropCancelledUnlisten() } catch {} fileDropCancelledUnlisten = null }
+  if (fileDropWebviewUnlisten) { try { fileDropWebviewUnlisten() } catch {} fileDropWebviewUnlisten = null }
+})
 
 </script>
 

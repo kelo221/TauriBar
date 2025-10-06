@@ -22,16 +22,14 @@
 <script setup lang="ts">
 import { useTabStore } from '../../stores/tabStore'
 import PlaylistGrid from '../../components/playlist/PlaylistGrid.vue'
+import { usePlaylistStore } from '../../stores/playlistStore'
+import { onMounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 
 const tabStore = useTabStore()
-const {
-  tabs,
-  activeTabIndex,
-  createTab,
-  removeTab,
-  renameTab,
-  setActiveTab
-} = tabStore
+const playlistStore = usePlaylistStore()
+const { tabs, activeTabIndex } = storeToRefs(tabStore)
+const { createTab, removeTab, renameTab, setActiveTab } = tabStore
 
 function handleRename(tab: Tab) {
   const newName = prompt('Enter new name:')
@@ -52,6 +50,17 @@ function handleClickOnBar(event: MouseEvent) {
 function handleMiddleClickOnBar(event: MouseEvent) {
   // prevent scrolling click on empty bar; do nothing else
 }
+
+function syncActiveTabPlaylistToStore() {
+  const idx = activeTabIndex.value
+  const tab = idx >= 0 ? tabs.value[idx] : undefined
+  const pl = tab?.playlist ?? { id: 'empty', name: 'Empty', songs: [] }
+  playlistStore.setPlaylist(pl)
+}
+
+onMounted(syncActiveTabPlaylistToStore)
+
+watch(activeTabIndex, syncActiveTabPlaylistToStore)
 </script>
 
 <style scoped>

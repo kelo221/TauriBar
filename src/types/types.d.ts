@@ -7,6 +7,7 @@ type Tab = {
     id: string;
     label: string;
     content: TabContent;
+    playlist?: Playlist;
 };
 
 type BottomStats = {

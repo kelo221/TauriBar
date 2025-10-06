@@ -63,6 +63,44 @@ export const usePlaylistStore = defineStore('playlists',
       }
     }
 
+    function removeSongsByIds(ids: string[]) {
+      try {
+        if (!ids || ids.length === 0) return
+        const idSet = new Set(ids)
+        const oldList = currentPlayList.value.songs
+        const oldSelectedId = selectedSong.value?.id ?? null
+        const oldSelectedIndex = oldSelectedId ? oldList.findIndex(s => s.id === oldSelectedId) : -1
+
+        const newList = oldList.filter(song => !idSet.has(song.id))
+
+        // Replace playlist object to ensure reactivity across stores/tabs
+        currentPlayList.value = {
+          ...currentPlayList.value,
+          songs: newList,
+        }
+
+        // Recompute selection to a sensible neighbor
+        if (newList.length === 0) {
+          selectedSong.value = undefined
+          return
+        }
+
+        // If the previous selected song remains, keep it
+        if (oldSelectedId && newList.some(s => s.id === oldSelectedId)) {
+          const keep = newList.find(s => s.id === oldSelectedId)!
+          selectedSong.value = keep
+          return
+        }
+
+        // Otherwise choose a neighbor near the previous index
+        let nextIndex = oldSelectedIndex >= 0 ? oldSelectedIndex : 0
+        if (nextIndex >= newList.length) nextIndex = newList.length - 1
+        selectedSong.value = newList[nextIndex]
+      } catch (e) {
+        console.error('Failed to remove songs', e)
+      }
+    }
+
     function setPlaylist(newStats: Playlist) {
       currentPlayList.value = newStats
     }
@@ -111,5 +149,5 @@ export const usePlaylistStore = defineStore('playlists',
       }
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, removeSongsByIds, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
   })

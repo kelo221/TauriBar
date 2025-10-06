@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent, RowDoubleClickedEvent } from 'ag-grid-community'
+import { ModuleRegistry, AllCommunityModule, ColDef, GridOptions, GridApi, GridReadyEvent, RowClickedEvent, RowDoubleClickedEvent, SelectionChangedEvent, CellKeyDownEvent } from 'ag-grid-community'
 import { AgGridVue } from 'ag-grid-vue3'
 import { usePlaylistStore } from '../../stores/playlistStore'
 import { useSearchStore } from '../../stores/searchStore'
@@ -36,6 +36,7 @@ const defaultColDef: ColDef = {
 }
 
 const gridApi = ref<GridApi<AudioFile> | null>(null)
+const wrapperRef = ref<HTMLElement | null>(null)
 
 const matchIds = ref<string[]>([])
 const currentMatchIndex = ref<number>(-1)
@@ -74,7 +75,7 @@ function selectRowById(id: string) {
   api.forEachNode((node) => {
     const match = node.data && node.data.id === id
     if (match) {
-      node.setSelected(true, true)
+      node.setSelected(true, false)
       api.ensureNodeVisible(node, 'middle')
       found = true
     }
@@ -91,7 +92,7 @@ function selectRowByIdAndSync(id: string) {
   api.forEachNode((node) => {
     const match = node.data && node.data.id === id
     if (match) {
-      node.setSelected(true, true)
+      node.setSelected(true, false)
       api.ensureNodeVisible(node, 'middle')
       selectedData = node.data as AudioFile
     }
@@ -129,6 +130,61 @@ function onRowClicked(event: RowClickedEvent<AudioFile>) {
 function onRowDoubleClicked(event: RowDoubleClickedEvent<AudioFile>) {
   if (event.data) {
     playlistStore.playSong(event.data)
+  }
+}
+
+function onSelectionChanged(event: SelectionChangedEvent) {
+  const api = event.api
+  const sel = api.getSelectedRows() as AudioFile[]
+  if (!sel || sel.length === 0) {
+    // do not force-clear selectedSong here; keep current until explicit change
+    return
+  }
+  // Set the last selected as current
+  const last = sel[sel.length - 1]
+  if (last) playlistStore.setSelectedSong(last)
+}
+
+function deleteSelectedRows() {
+  const api = gridApi.value
+  if (!api) return
+  const nodes = api.getSelectedNodes()
+  if (!nodes || nodes.length === 0) return
+  const ids = nodes.map(n => n.data?.id).filter((v): v is string => typeof v === 'string')
+  if (ids.length === 0) return
+  const remover: any = (playlistStore as any).removeSongsByIds
+  if (typeof remover === 'function') {
+    remover.call(playlistStore, ids)
+  } else {
+    // Fallback if store hot-reload missed: perform client-side removal
+    const oldList = playlistStore.currentPlayList.songs
+    const idSet = new Set(ids)
+    const newList = oldList.filter(s => !idSet.has(s.id))
+    const oldSelectedId = playlistStore.selectedSong?.id ?? null
+    let nextSelection: AudioFile | undefined
+    if (newList.length > 0) {
+      if (oldSelectedId && newList.some(s => s.id === oldSelectedId)) {
+        nextSelection = newList.find(s => s.id === oldSelectedId)
+      } else {
+        const oldIndex = oldSelectedId ? oldList.findIndex(s => s.id === oldSelectedId) : -1
+        let idx = oldIndex >= 0 ? oldIndex : 0
+        if (idx >= newList.length) idx = newList.length - 1
+        nextSelection = newList[idx]
+      }
+    }
+    playlistStore.setPlaylist({ ...playlistStore.currentPlayList, songs: newList })
+    if (nextSelection) playlistStore.setSelectedSong(nextSelection)
+  }
+  // persist into active tab so switching tabs keeps changes
+  tabStore.setActiveTabPlaylist(playlistStore.currentPlayList)
+}
+
+function onCellKeyDown(event: CellKeyDownEvent) {
+  const key = (event.event as KeyboardEvent).key
+  if (key === 'Delete') {
+    (event.event as KeyboardEvent).preventDefault()
+    ;(event.event as KeyboardEvent).stopPropagation()
+    deleteSelectedRows()
   }
 }
 
@@ -182,7 +238,8 @@ const gridOptions: GridOptions<AudioFile> = {
   suppressDragLeaveHidesColumns: true,
   ensureDomOrder: true,
   theme: 'legacy',
-  rowSelection: { mode: 'singleRow', checkboxes: false },
+  rowSelection: 'multiple',
+  rowMultiSelectWithClick: false,
   suppressRowClickSelection: false,
   suppressRowDeselection: false,
   getRowId: (params) => params.data?.id ?? '',
@@ -256,9 +313,26 @@ function setupFileDropHandler() {
 
 onMounted(() => {
   setupFileDropHandler()
+  // Fallback handler: allow Delete key when focus is inside our wrapper
+  const onKeydown = (e: KeyboardEvent) => {
+    if (e.key !== 'Delete') return
+    const wrapper = wrapperRef.value
+    const active = document.activeElement as HTMLElement | null
+    if (wrapper && active && wrapper.contains(active)) {
+      e.preventDefault()
+      e.stopPropagation()
+      deleteSelectedRows()
+    }
+  }
+  window.addEventListener('keydown', onKeydown, { capture: true })
+  ;(onKeydown as any)._isTauriBar = true
+  ;(window as any)._tbKeydown = onKeydown
   // Add DOM listeners just to confirm browser-level drop reaches us
   window.addEventListener('dragover', (e) => {
     e.preventDefault()
+    // prevent OS text selection visuals during drag
+    const el = wrapperRef.value
+    if (el) el.classList.add('no-select')
   })
   window.addEventListener('drop', (e) => {
     e.preventDefault()
@@ -281,6 +355,10 @@ onMounted(() => {
       console.error('[ui] DOM drop handler error', err)
     }
   })
+  window.addEventListener('dragend', () => {
+    const el = wrapperRef.value
+    if (el) el.classList.remove('no-select')
+  })
 })
 
 onBeforeUnmount(() => {
@@ -288,12 +366,16 @@ onBeforeUnmount(() => {
   if (fileDropHoverUnlisten) { try { fileDropHoverUnlisten() } catch {} fileDropHoverUnlisten = null }
   if (fileDropCancelledUnlisten) { try { fileDropCancelledUnlisten() } catch {} fileDropCancelledUnlisten = null }
   if (fileDropWebviewUnlisten) { try { fileDropWebviewUnlisten() } catch {} fileDropWebviewUnlisten = null }
+  try {
+    const fn = (window as any)._tbKeydown as any
+    if (fn) window.removeEventListener('keydown', fn, { capture: true } as any)
+  } catch {}
 })
 
 </script>
 
 <template>
-  <div class="grid-wrapper ag-theme-alpine cs-theme">
+  <div class="grid-wrapper ag-theme-alpine cs-theme" ref="wrapperRef">
     <AgGridVue
       style="width: 100%; height: 100%"
       :columnDefs="columnDefs"
@@ -303,6 +385,8 @@ onBeforeUnmount(() => {
       @grid-ready="onGridReady"
       @row-clicked="onRowClicked"
       @row-double-clicked="onRowDoubleClicked"
+      @selection-changed="onSelectionChanged"
+      @cell-key-down="onCellKeyDown"
     />
   </div>
   
@@ -312,6 +396,19 @@ onBeforeUnmount(() => {
 .grid-wrapper {
   height: 100%;
   width: 100%;
+}
+
+.grid-wrapper,
+.grid-wrapper * {
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+}
+
+.grid-wrapper.no-select {
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
 }
 
 /* CS16 theme overrides for AG Grid */

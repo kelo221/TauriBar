@@ -2,8 +2,10 @@
 import {useStatStore} from "../../stores/statStore";
 import {computed, onMounted, onBeforeUnmount} from "vue";
 import { invoke } from '@tauri-apps/api/core'
+import { useSettingsStore } from "../../stores/settingsStore";
 
 const statStore = useStatStore();
+const settingsStore = useSettingsStore();
 const currentBottomStats = computed(() => statStore.stats);
 
 const displayLine = computed(() => {
@@ -49,6 +51,9 @@ onBeforeUnmount(() => {
 <template>
   <footer class="statusbar">
     <span>{{ displayLine }}</span>
+    <button class="settings-btn" @click="settingsStore.open()" title="Settings">
+      <img src="../../assets/gear_high_contrast.svg" alt="Settings" />
+    </button>
   </footer>
 </template>
 
@@ -58,5 +63,24 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border-dark);
   background: var(--bg);
   font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-btn {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.settings-btn img {
+  width: 16px;
+  height: 16px;
 }
 </style>

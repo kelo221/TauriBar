@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import TopButtonContainer from "./components/ui/TopButtonContainer.vue";
 import PlaybackButtonsContainer from "./components/playback/PlaybackButtonsContainer.vue";
 import VolumeControl from "./components/playback/VolumeControl.vue";
 import ProgressBar from "./components/playback/ProgressBar.vue";
 import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
 import SearchOverlay from "./components/ui/SearchOverlay.vue";
+import SettingsOverlay from "./components/ui/SettingsOverlay.vue";
 import { onMounted, onBeforeUnmount } from 'vue';
 import { usePlaylistStore } from './stores/playlistStore';
 import { useSearchStore } from './stores/searchStore';
@@ -45,9 +45,6 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="app">
-    <div class="menu-bar">
-      <TopButtonContainer />
-    </div>
 
     <div class="toolbar-row">
       <div class="left">
@@ -68,6 +65,7 @@ onBeforeUnmount(() => {
 
     <BottomStats />
     <SearchOverlay />
+    <SettingsOverlay />
   </main>
   
 </template>
@@ -83,10 +81,7 @@ onBeforeUnmount(() => {
           user-select: none;
 }
 
-.menu-bar {
-  padding: 1px 2px;
-  border-bottom: 1px solid var(--border-dark);
-}
+
 
 .toolbar-row {
   display: flex;

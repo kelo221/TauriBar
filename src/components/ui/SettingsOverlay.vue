@@ -1,11 +1,29 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount } from 'vue'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { comboToString, eventToCombo } from '../../utils/keyboard'
 
 const settingsStore = useSettingsStore()
 
+type ShortcutAction = 'playPause' | 'stop' | 'previous' | 'next' | 'random'
+
 function onKeydown(event: KeyboardEvent) {
   if (!settingsStore.isOpen) return
+  // If capturing, assign on any non-modifier; Esc cancels capture
+  if (settingsStore.captureTarget) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      settingsStore.beginCapture(null)
+      return
+    }
+    const combo = eventToCombo(event)
+    if (combo) {
+      settingsStore.assignShortcut(settingsStore.captureTarget, combo)
+      settingsStore.beginCapture(null)
+    }
+    return
+  }
   if (event.key === 'Escape') {
     event.preventDefault()
     settingsStore.close()
@@ -23,6 +41,19 @@ onBeforeUnmount(() => {
 function close() {
   settingsStore.close()
 }
+
+function startCapture(action: ShortcutAction) {
+  settingsStore.beginCapture(action)
+}
+
+function clear(action: ShortcutAction) {
+  settingsStore.clearShortcut(action)
+}
+
+function formatShortcut(action: ShortcutAction): string {
+  const combo = settingsStore.shortcuts[action]
+  return comboToString(combo) || 'Unassigned'
+}
 </script>
 
 <template>
@@ -31,22 +62,63 @@ function close() {
       <div class="title">Settings</div>
 
       <div class="content">
-        <!-- Placeholder settings; extend as needed -->
         <div class="section">
-          <div class="section-title">General</div>
-          <div class="row">
-            <label><input type="checkbox" /> Enable notifications</label>
-          </div>
-          <div class="row">
-            <label><input type="checkbox" /> Start playback on launch</label>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="section-title">Appearance</div>
-          <div class="row">
-            <label><input type="checkbox" /> High contrast theme</label>
-          </div>
+          <div class="section-title">Keyboard Shortcuts</div>
+          <table class="shortcuts">
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Shortcut</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Play / Pause</td>
+                <td class="keys">
+                  <button class="capture" :class="{ active: settingsStore.captureTarget==='playPause' }" @click="startCapture('playPause')">
+                    {{ settingsStore.captureTarget==='playPause' ? 'Listening…' : formatShortcut('playPause') }}
+                  </button>
+                  <button class="clear" @click="clear('playPause')">Clear</button>
+                </td>
+              </tr>
+              <tr>
+                <td>Stop</td>
+                <td class="keys">
+                  <button class="capture" :class="{ active: settingsStore.captureTarget==='stop' }" @click="startCapture('stop')">
+                    {{ settingsStore.captureTarget==='stop' ? 'Listening…' : formatShortcut('stop') }}
+                  </button>
+                  <button class="clear" @click="clear('stop')">Clear</button>
+                </td>
+              </tr>
+              <tr>
+                <td>Previous track</td>
+                <td class="keys">
+                  <button class="capture" :class="{ active: settingsStore.captureTarget==='previous' }" @click="startCapture('previous')">
+                    {{ settingsStore.captureTarget==='previous' ? 'Listening…' : formatShortcut('previous') }}
+                  </button>
+                  <button class="clear" @click="clear('previous')">Clear</button>
+                </td>
+              </tr>
+              <tr>
+                <td>Next track</td>
+                <td class="keys">
+                  <button class="capture" :class="{ active: settingsStore.captureTarget==='next' }" @click="startCapture('next')">
+                    {{ settingsStore.captureTarget==='next' ? 'Listening…' : formatShortcut('next') }}
+                  </button>
+                  <button class="clear" @click="clear('next')">Clear</button>
+                </td>
+              </tr>
+              <tr>
+                <td>Play random track</td>
+                <td class="keys">
+                  <button class="capture" :class="{ active: settingsStore.captureTarget==='random' }" @click="startCapture('random')">
+                    {{ settingsStore.captureTarget==='random' ? 'Listening…' : formatShortcut('random') }}
+                  </button>
+                  <button class="clear" @click="clear('random')">Clear</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -112,5 +184,47 @@ function close() {
   background: var(--secondary-bg);
   color: var(--text);
   border: 1px solid var(--border-dark);
+}
+
+/* Shortcuts table */
+.shortcuts {
+  width: 100%;
+  border-collapse: collapse;
+}
+.shortcuts th,
+.shortcuts td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(0,0,0,0.2);
+  text-align: left;
+}
+.shortcuts .keys kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border-dark);
+  border-radius: 3px;
+  background: var(--bg);
+}
+
+.shortcuts .keys {
+  display: flex;
+  gap: 6px;
+}
+
+.capture {
+  padding: 2px 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-dark);
+  border-radius: 4px;
+}
+.capture.active {
+  outline: 1px dashed var(--border-light);
+}
+.clear {
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border-dark);
+  border-radius: 4px;
 }
 </style>

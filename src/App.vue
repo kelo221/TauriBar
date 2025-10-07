@@ -6,12 +6,16 @@ import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
 import SearchOverlay from "./components/ui/SearchOverlay.vue";
 import SettingsOverlay from "./components/ui/SettingsOverlay.vue";
-import { onMounted, onBeforeUnmount } from 'vue';
+import { onMounted, onBeforeUnmount, unref } from 'vue';
 import { usePlaylistStore } from './stores/playlistStore';
 import { useSearchStore } from './stores/searchStore';
+import { useSettingsStore } from './stores/settingsStore';
+import { doesEventMatchCombo } from './utils/keyboard';
+import { invoke } from '@tauri-apps/api/core'
 
 const playlistStore = usePlaylistStore();
 const searchStore = useSearchStore();
+const settingsStore = useSettingsStore();
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   const isCtrlF = (event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F');
@@ -29,6 +33,50 @@ function handleGlobalKeydown(event: KeyboardEvent) {
       searchStore.prev();
     } else {
       searchStore.next();
+    }
+    return;
+  }
+
+  // Skip when Settings/Search overlays are capturing/active
+  if (settingsStore.isOpen || searchStore.isOpen) return;
+
+  // Playback shortcuts
+  const s = settingsStore.shortcuts;
+  if (doesEventMatchCombo(event, s.playPause)) {
+    event.preventDefault();
+    // If we have a selected song and it hasn't been played yet, start it; otherwise toggle
+    const selected = unref((playlistStore as any).selectedSong) as AudioFile | undefined
+    const lastId = unref((playlistStore as any).lastPlayedSongId) as string | null | undefined
+    if (selected && selected.id) {
+      if (lastId && lastId === selected.id) {
+        invoke('toggle_play_pause').catch(console.error)
+      } else {
+        playlistStore.playSelected();
+      }
+    } else {
+      invoke('toggle_play_pause').catch(console.error)
+    }
+    return;
+  }
+  if (doesEventMatchCombo(event, s.stop)) {
+    event.preventDefault();
+    invoke('stop_audio').catch(console.error);
+    return;
+  }
+  if (doesEventMatchCombo(event, s.previous)) {
+    event.preventDefault();
+    playlistStore.playPrevious();
+    return;
+  }
+  if (doesEventMatchCombo(event, s.next)) {
+    event.preventDefault();
+    playlistStore.playNext();
+    return;
+  }
+  if (doesEventMatchCombo(event, s.random)) {
+    event.preventDefault();
+    if (typeof (playlistStore as any).playRandom === 'function') {
+      (playlistStore as any).playRandom();
     }
     return;
   }

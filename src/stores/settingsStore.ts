@@ -1,8 +1,43 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { deserializeCombo, serializeCombo } from '../utils/keyboard'
 
 export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
+  const captureTarget = ref<null | 'playPause' | 'stop' | 'previous' | 'next' | 'random'>(null)
+
+  // Defaults
+  const shortcuts = ref<ShortcutMap>({
+    playPause: { key: 'Space', alt: false, ctrl: false, meta: false, shift: false },
+    stop: { key: 'S', alt: false, ctrl: false, meta: false, shift: false },
+    previous: { key: 'ArrowLeft', alt: false, ctrl: false, meta: false, shift: false },
+    next: { key: 'ArrowRight', alt: false, ctrl: false, meta: false, shift: false },
+    random: { key: 'R', alt: false, ctrl: false, meta: false, shift: false },
+  })
+
+  // Load from localStorage if present
+  try {
+    const stored = localStorage.getItem('tb.shortcuts')
+    if (stored) {
+      const obj = JSON.parse(stored) as Partial<Record<keyof ShortcutMap, string>>
+      const next: any = { ...shortcuts.value }
+      for (const k of Object.keys(next) as (keyof ShortcutMap)[]) {
+        const raw = obj[k]
+        const parsed = deserializeCombo(raw as any)
+        if (parsed) next[k] = parsed
+      }
+      shortcuts.value = next
+    }
+  } catch {}
+
+  // Persist
+  watch(shortcuts, (val) => {
+    try {
+      const payload: Record<string, string> = {}
+      for (const [k, v] of Object.entries(val)) payload[k] = serializeCombo(v as any)
+      localStorage.setItem('tb.shortcuts', JSON.stringify(payload))
+    } catch {}
+  }, { deep: true })
 
   function open() {
     isOpen.value = true
@@ -12,5 +47,18 @@ export const useSettingsStore = defineStore('settings', () => {
     isOpen.value = false
   }
 
-  return { isOpen, open, close }
+  function beginCapture(target: 'playPause' | 'stop' | 'previous' | 'next' | 'random' | null) {
+    captureTarget.value = target
+  }
+
+  function assignShortcut(action: 'playPause' | 'stop' | 'previous' | 'next' | 'random', combo: KeyCombo) {
+    shortcuts.value = { ...shortcuts.value, [action]: combo }
+  }
+
+  function clearShortcut(action: 'playPause' | 'stop' | 'previous' | 'next' | 'random') {
+    const existing = shortcuts.value[action]
+    shortcuts.value = { ...shortcuts.value, [action]: { ...existing, key: '' } }
+  }
+
+  return { isOpen, open, close, shortcuts, captureTarget, beginCapture, assignShortcut, clearShortcut }
 })

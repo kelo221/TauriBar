@@ -36,3 +36,20 @@ type AudioFile = {
     album: string;
     duration: string;
 }
+
+// Keyboard shortcuts
+type KeyCombo = {
+    key: string;
+    alt: boolean;
+    ctrl: boolean;
+    meta: boolean;
+    shift: boolean;
+}
+
+type ShortcutMap = {
+    playPause: KeyCombo;
+    stop: KeyCombo;
+    previous: KeyCombo;
+    next: KeyCombo;
+    random: KeyCombo;
+}

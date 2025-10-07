@@ -72,6 +72,7 @@ function selectRowById(id: string) {
   const api = gridApi.value
   if (!api) return
   let found = false
+  api.deselectAll()
   api.forEachNode((node) => {
     const match = node.data && node.data.id === id
     if (match) {
@@ -89,6 +90,7 @@ function selectRowByIdAndSync(id: string) {
   const api = gridApi.value
   if (!api) return
   let selectedData: AudioFile | null = null
+  api.deselectAll()
   api.forEachNode((node) => {
     const match = node.data && node.data.id === id
     if (match) {

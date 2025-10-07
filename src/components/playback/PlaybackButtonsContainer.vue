@@ -41,11 +41,24 @@ function PlayNext() {
 function PlayRandom() {
   console.log("Playing random song");
   const playlist = usePlaylistStore()
-  const song = playlist.selectedSong.value
-  if (song && song.id) {
-    invoke("play_audio", { path: song.id }).catch(console.error)
-  } else {
-    console.warn('No selected song to play')
+  if (typeof (playlist as any).playRandom === 'function') {
+    playlist.playRandom()
+    return
+  }
+  // Fallback if the store instance hasn't hot-updated yet
+  const list = playlist.currentPlayList.songs
+  if (!list || list.length === 0) return
+  const currentId = playlist.selectedSong.value?.id || null
+  let index = Math.floor(Math.random() * list.length)
+  if (list.length > 1 && currentId) {
+    const currentIndex = list.findIndex(s => s.id === currentId)
+    if (currentIndex === index) {
+      index = (index + 1) % list.length
+    }
+  }
+  const next = list[index]
+  if (next) {
+    playlist.playSong(next)
   }
 }
 

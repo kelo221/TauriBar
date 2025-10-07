@@ -149,5 +149,22 @@ export const usePlaylistStore = defineStore('playlists',
       }
     }
 
-    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, removeSongsByIds, lastPlayedSongId, playSong, playSelected, playNext, playPrevious }
+    function playRandom() {
+      const list = currentPlayList.value.songs
+      if (!list || list.length === 0) return
+      const currentId = selectedSong.value?.id || null
+      let index = Math.floor(Math.random() * list.length)
+      if (list.length > 1 && currentId) {
+        const currentIndex = list.findIndex(s => s.id === currentId)
+        if (currentIndex === index) {
+          index = (index + 1) % list.length
+        }
+      }
+      const next = list[index]
+      if (next) {
+        playSong(next)
+      }
+    }
+
+    return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, removeSongsByIds, lastPlayedSongId, playSong, playSelected, playNext, playPrevious, playRandom }
   })

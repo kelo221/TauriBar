@@ -75,4 +75,23 @@ export function deserializeCombo(value: string | null | undefined): KeyCombo | n
   return null
 }
 
+// Convert an internal KeyCombo to a Tauri global-shortcut accelerator string
+// See: https://tauri.app/reference/javascript/global-shortcut/
+export function comboToAccelerator(combo: KeyCombo | null | undefined): string {
+  if (!combo || !combo.key) return ''
+  const parts: string[] = []
+  if (combo.ctrl) parts.push('Ctrl')
+  if (combo.alt) parts.push('Alt')
+  if (combo.shift) parts.push('Shift')
+  if (combo.meta) parts.push('Meta')
+  let key = combo.key
+  // Map common non-character keys to accelerator names
+  if (key === 'ArrowLeft') key = 'Left'
+  else if (key === 'ArrowRight') key = 'Right'
+  else if (key === 'ArrowUp') key = 'Up'
+  else if (key === 'ArrowDown') key = 'Down'
+  parts.push(key)
+  return parts.join('+')
+}
+
 

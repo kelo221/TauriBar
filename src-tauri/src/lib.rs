@@ -1,16 +1,19 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use once_cell::sync::OnceCell;
+use rodio::{OutputStream, Sink, Source};
 use serde::Serialize;
 use std::{
     ffi::OsStr,
     fs,
     io::{self, BufReader, Read},
     path::{Path, PathBuf},
-    process::{Command, Stdio, Child, ChildStdout},
-    sync::{mpsc::{self}, Arc, Mutex},
+    process::{Child, ChildStdout, Command, Stdio},
+    sync::{
+        mpsc::{self},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
-use once_cell::sync::OnceCell;
-use rodio::{OutputStream, Sink, Source};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -35,7 +38,10 @@ fn find_testfiles_dir() -> Option<PathBuf> {
     ];
     for dir in candidates {
         if dir.exists() {
-            println!("[backend] testfiles dir found at: {}", dir.to_string_lossy());
+            println!(
+                "[backend] testfiles dir found at: {}",
+                dir.to_string_lossy()
+            );
             return Some(dir);
         }
     }
@@ -44,7 +50,11 @@ fn find_testfiles_dir() -> Option<PathBuf> {
 }
 
 fn is_supported_audio(path: &Path) -> bool {
-    match path.extension().and_then(OsStr::to_str).map(|s| s.to_lowercase()) {
+    match path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(|s| s.to_lowercase())
+    {
         Some(ext) => matches!(
             ext.as_str(),
             "wv" | "wav" | "mp3" | "flac" | "ogg" | "m4a" | "aac" | "opus" | "aiff" | "caf"
@@ -69,10 +79,17 @@ fn parse_track_and_title(file_stem: &str) -> (u32, String) {
     let mut rest = chars.collect::<String>();
     // Remove common separators after track numbers
     if !digits.is_empty() {
-        rest = rest.trim_start_matches(['.', '-', ' ']).trim_start().to_string();
+        rest = rest
+            .trim_start_matches(['.', '-', ' '])
+            .trim_start()
+            .to_string();
     }
     let track = digits.parse::<u32>().unwrap_or(0);
-    let title = if rest.is_empty() { trimmed.to_string() } else { rest };
+    let title = if rest.is_empty() {
+        trimmed.to_string()
+    } else {
+        rest
+    };
     (track, title)
 }
 
@@ -103,7 +120,10 @@ fn ffprobe_duration(path: &Path) -> Option<String> {
         .output()
         .ok()?;
     if !output.status.success() {
-        eprintln!("[backend] ffprobe_duration failed for {}", path.to_string_lossy());
+        eprintln!(
+            "[backend] ffprobe_duration failed for {}",
+            path.to_string_lossy()
+        );
         return None;
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -157,7 +177,10 @@ fn ffprobe_tags(path: &Path) -> Option<(String, String)> {
         .output()
         .ok()?;
     if !output.status.success() {
-        eprintln!("[backend] ffprobe_tags failed for {}", path.to_string_lossy());
+        eprintln!(
+            "[backend] ffprobe_tags failed for {}",
+            path.to_string_lossy()
+        );
         return None;
     }
 
@@ -245,11 +268,21 @@ fn ffprobe_stream_info(path: &Path) -> Option<(String, u32, u32, u32)> {
     let streams = value.get("streams")?.as_array()?;
     let s = streams.first()?.as_object()?;
     let codec_name = s.get("codec_name").and_then(|v| v.as_str()).unwrap_or("");
-    let bit_rate = s.get("bit_rate").and_then(|v| v.as_str()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let bit_rate = s
+        .get("bit_rate")
+        .and_then(|v| v.as_str())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
     let channels = s.get("channels").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let sample_rate = s.get("sample_rate").and_then(|v| v.as_str()).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let sample_rate = s
+        .get("sample_rate")
+        .and_then(|v| v.as_str())
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
     // Pretty codec display
-    let codec_display = if codec_name.is_empty() { String::new() } else {
+    let codec_display = if codec_name.is_empty() {
+        String::new()
+    } else {
         let mut c = codec_name.to_string();
         if let Some(first) = c.get_mut(0..1) {
             first.make_ascii_uppercase();
@@ -303,7 +336,10 @@ fn playback_state() -> &'static Arc<Mutex<PlaybackState>> {
 }
 
 /// Spawns ffmpeg to decode audio to signed 16-bit PCM (s16le), stereo, 48kHz, streamed to stdout.
-fn spawn_ffmpeg_pcm_stream(input: &Path, start_seconds: Option<f64>) -> Result<(Child, ChildStdout), String> {
+fn spawn_ffmpeg_pcm_stream(
+    input: &Path,
+    start_seconds: Option<f64>,
+) -> Result<(Child, ChildStdout), String> {
     println!(
         "[backend] spawn_ffmpeg_pcm_stream input={} start={:?}",
         input.to_string_lossy(),
@@ -316,10 +352,12 @@ fn spawn_ffmpeg_pcm_stream(input: &Path, start_seconds: Option<f64>) -> Result<(
         cmd.arg("-ss").arg(format!("{}", ss));
     }
     cmd.arg("-i").arg(input.as_os_str());
-    cmd
-        .arg("-f").arg("s16le")
-        .arg("-ac").arg("2")
-        .arg("-ar").arg("48000")
+    cmd.arg("-f")
+        .arg("s16le")
+        .arg("-ac")
+        .arg("2")
+        .arg("-ar")
+        .arg("48000")
         .arg("pipe:1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -331,7 +369,10 @@ fn spawn_ffmpeg_pcm_stream(input: &Path, start_seconds: Option<f64>) -> Result<(
             e
         )
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| "failed to capture ffmpeg stdout".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture ffmpeg stdout".to_string())?;
     Ok((child, stdout))
 }
 
@@ -559,7 +600,11 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                     println!("[backend] received SeekTo {}s", sec);
                     if let Some(input_path) = current_input_path.as_ref() {
                         let duration_limit = playback_state().lock().unwrap().duration_seconds;
-                        let target_sec = if let Some(d) = duration_limit { sec.max(0.0).min(d - 0.001) } else { sec.max(0.0) };
+                        let target_sec = if let Some(d) = duration_limit {
+                            sec.max(0.0).min(d - 0.001)
+                        } else {
+                            sec.max(0.0)
+                        };
                         if let Some(s) = current_sink.take() {
                             s.stop();
                             println!("[backend] stopped sink before seek");
@@ -568,7 +613,9 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                             let _ = ch.kill();
                             let _ = ch.wait();
                         }
-                        if let Ok((child, stdout)) = spawn_ffmpeg_pcm_stream(input_path, Some(target_sec)) {
+                        if let Ok((child, stdout)) =
+                            spawn_ffmpeg_pcm_stream(input_path, Some(target_sec))
+                        {
                             let source = PcmStreamSource::new(stdout, 2, 48000);
                             match Sink::try_new(&handle) {
                                 Ok(sink) => {
@@ -579,7 +626,8 @@ fn start_audio_thread() -> mpsc::Sender<PlayerCommand> {
                                     current_ffmpeg_child = Some(child);
                                     println!("[backend] playback started after seek");
                                     let mut st = playback_state().lock().unwrap();
-                                    st.started_at = Some(Instant::now() - Duration::from_secs_f64(target_sec));
+                                    st.started_at =
+                                        Some(Instant::now() - Duration::from_secs_f64(target_sec));
                                     st.accumulated_pause = Duration::from_millis(0);
                                     st.paused_at = None;
                                     st.is_playing = true;
@@ -703,7 +751,10 @@ fn get_playback_state() -> Result<FrontendPlaybackState, String> {
 fn list_media_files() -> Result<Vec<FrontendAudioFile>, String> {
     println!("[backend] list_media_files invoked");
     let base = find_testfiles_dir().ok_or_else(|| "testfiles directory not found".to_string())?;
-    println!("[backend] listing media files under {}", base.to_string_lossy());
+    println!(
+        "[backend] listing media files under {}",
+        base.to_string_lossy()
+    );
     let mut items: Vec<FrontendAudioFile> = Vec::new();
 
     let entries = fs::read_dir(&base).map_err(|e| format!("failed to read dir: {}", e))?;
@@ -740,10 +791,14 @@ fn list_media_files() -> Result<Vec<FrontendAudioFile>, String> {
 }
 
 /// Recursively traverse a directory collecting supported audio files
-fn collect_media_from_dir_recursive(dir: &Path, items: &mut Vec<FrontendAudioFile>) -> Result<(), String> {
+fn collect_media_from_dir_recursive(
+    dir: &Path,
+    items: &mut Vec<FrontendAudioFile>,
+) -> Result<(), String> {
     let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        let entries = fs::read_dir(&current).map_err(|e| format!("failed to read dir '{}': {}", current.to_string_lossy(), e))?;
+        let entries = fs::read_dir(&current)
+            .map_err(|e| format!("failed to read dir '{}': {}", current.to_string_lossy(), e))?;
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
@@ -759,7 +814,14 @@ fn collect_media_from_dir_recursive(dir: &Path, items: &mut Vec<FrontendAudioFil
                 let duration = ffprobe_duration(&path).unwrap_or_default();
                 let (artist, album) = ffprobe_tags(&path).unwrap_or((String::new(), String::new()));
                 let id = path.to_string_lossy().to_string();
-                let item = FrontendAudioFile { id, track, title, artist, album, duration };
+                let item = FrontendAudioFile {
+                    id,
+                    track,
+                    title,
+                    artist,
+                    album,
+                    duration,
+                };
                 println!("[backend] found media: {}", item.id);
                 items.push(item);
             }
@@ -770,8 +832,13 @@ fn collect_media_from_dir_recursive(dir: &Path, items: &mut Vec<FrontendAudioFil
 
 #[tauri::command]
 fn list_media_files_from_paths(paths: Vec<String>) -> Result<Vec<FrontendAudioFile>, String> {
-    println!("[backend] list_media_files_from_paths invoked with {} path(s)", paths.len());
-    for p in &paths { println!("[backend] path: {}", p); }
+    println!(
+        "[backend] list_media_files_from_paths invoked with {} path(s)",
+        paths.len()
+    );
+    for p in &paths {
+        println!("[backend] path: {}", p);
+    }
     let mut items: Vec<FrontendAudioFile> = Vec::new();
 
     for p in paths {
@@ -789,7 +856,14 @@ fn list_media_files_from_paths(paths: Vec<String>) -> Result<Vec<FrontendAudioFi
                 let duration = ffprobe_duration(&pb).unwrap_or_default();
                 let (artist, album) = ffprobe_tags(&pb).unwrap_or((String::new(), String::new()));
                 let id = pb.to_string_lossy().to_string();
-                let item = FrontendAudioFile { id, track, title, artist, album, duration };
+                let item = FrontendAudioFile {
+                    id,
+                    track,
+                    title,
+                    artist,
+                    album,
+                    duration,
+                };
                 println!("[backend] found media: {}", item.id);
                 items.push(item);
             } else {
@@ -810,6 +884,7 @@ fn list_media_files_from_paths(paths: Vec<String>) -> Result<Vec<FrontendAudioFi
 pub fn run() {
     println!("[backend] Tauri run starting");
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![

@@ -5,6 +5,7 @@ import { deserializeCombo, serializeCombo } from '../utils/keyboard'
 export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
   const captureTarget = ref<null | 'playPause' | 'stop' | 'previous' | 'next' | 'random'>(null)
+  const globalShortcutsEnabled = ref(true)
 
   // Defaults
   const shortcuts = ref<ShortcutMap>({
@@ -17,6 +18,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // Load from localStorage if present
   try {
+    const globalEnabled = localStorage.getItem('tb.globalShortcutsEnabled')
+    if (globalEnabled != null) {
+      globalShortcutsEnabled.value = globalEnabled === '1' || globalEnabled === 'true'
+    }
     const stored = localStorage.getItem('tb.shortcuts')
     if (stored) {
       const obj = JSON.parse(stored) as Partial<Record<keyof ShortcutMap, string>>
@@ -39,6 +44,12 @@ export const useSettingsStore = defineStore('settings', () => {
     } catch {}
   }, { deep: true })
 
+  watch(globalShortcutsEnabled, (val) => {
+    try {
+      localStorage.setItem('tb.globalShortcutsEnabled', val ? '1' : '0')
+    } catch {}
+  })
+
   function open() {
     isOpen.value = true
   }
@@ -60,5 +71,5 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcuts.value = { ...shortcuts.value, [action]: { ...existing, key: '' } }
   }
 
-  return { isOpen, open, close, shortcuts, captureTarget, beginCapture, assignShortcut, clearShortcut }
+  return { isOpen, open, close, shortcuts, captureTarget, beginCapture, assignShortcut, clearShortcut, globalShortcutsEnabled }
 })

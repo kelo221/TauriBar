@@ -6,12 +6,13 @@ import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
 import SearchOverlay from "./components/ui/SearchOverlay.vue";
 import SettingsOverlay from "./components/ui/SettingsOverlay.vue";
-import { onMounted, onBeforeUnmount, unref } from 'vue';
+import { onMounted, onBeforeUnmount, onUnmounted, watch, unref } from 'vue';
 import { usePlaylistStore } from './stores/playlistStore';
 import { useSearchStore } from './stores/searchStore';
 import { useSettingsStore } from './stores/settingsStore';
-import { doesEventMatchCombo } from './utils/keyboard';
+import { doesEventMatchCombo, comboToAccelerator } from './utils/keyboard';
 import { invoke } from '@tauri-apps/api/core'
+import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 
 const playlistStore = usePlaylistStore();
 const searchStore = useSearchStore();
@@ -89,6 +90,48 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown, { capture: true } as any);
 });
+
+// Global shortcut registration
+async function refreshGlobalShortcuts() {
+  try {
+    await unregisterAll()
+  } catch {}
+  if (!settingsStore.globalShortcutsEnabled) return
+  const s = settingsStore.shortcuts
+  const entries: Array<[string, (ev: any) => void]> = []
+  const make = (combo: KeyCombo | null | undefined, handler: () => void) => {
+    const accel = comboToAccelerator(combo)
+    if (accel) entries.push([accel, () => handler()])
+  }
+  make(s.playPause, () => invoke('toggle_play_pause').catch(console.error))
+  make(s.stop, () => invoke('stop_audio').catch(console.error))
+  make(s.previous, () => (playlistStore as any).playPrevious())
+  make(s.next, () => (playlistStore as any).playNext())
+  make(s.random, () => {
+    if (typeof (playlistStore as any).playRandom === 'function') (playlistStore as any).playRandom()
+  })
+  for (const [accel, handler] of entries) {
+    try {
+      await register(accel, (event) => {
+        if (event.state === 'Pressed') handler()
+      })
+    } catch (e) {
+      console.error('Failed to register global shortcut', accel, e)
+    }
+  }
+}
+
+watch(() => [settingsStore.globalShortcutsEnabled, settingsStore.shortcuts], () => {
+  refreshGlobalShortcuts()
+}, { deep: true })
+
+onMounted(() => {
+  refreshGlobalShortcuts()
+})
+
+onUnmounted(async () => {
+  try { await unregisterAll() } catch {}
+})
 </script>
 
 <template>

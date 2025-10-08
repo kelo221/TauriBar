@@ -63,6 +63,14 @@ function formatShortcut(action: ShortcutAction): string {
 
       <div class="content">
         <div class="section">
+          <div class="row">
+            <label class="checkbox">
+              <input type="checkbox" v-model="settingsStore.globalShortcutsEnabled" />
+              <span>Enable global media shortcuts</span>
+            </label>
+          </div>
+        </div>
+        <div class="section">
           <div class="section-title">Keyboard Shortcuts</div>
           <table class="shortcuts">
             <thead>

@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { comboToString, eventToCombo } from '../../utils/keyboard'
 
 const settingsStore = useSettingsStore()
 
 type ShortcutAction = 'playPause' | 'stop' | 'previous' | 'next' | 'random'
+
+// Local tabs for the settings overlay
+const tabs = ['Settings', 'Shortcuts', 'Playback'] as const
+const activeTabIndex = ref(0)
 
 function onKeydown(event: KeyboardEvent) {
   if (!settingsStore.isOpen) return
@@ -62,16 +66,29 @@ function formatShortcut(action: ShortcutAction): string {
       <div class="title">Settings</div>
 
       <div class="content">
-        <div class="section">
+        <div class="tabs">
+          <button
+            v-for="(t, i) in tabs"
+            :key="t"
+            class="tab-btn"
+            :class="{ active: i === activeTabIndex }"
+            @click="activeTabIndex = i"
+          >{{ t }}</button>
+        </div>
+
+        <div v-show="activeTabIndex === 0" class="section">
+          <div class="section-title">General</div>
+          <div class="row" style="opacity:.8">No general settings yet.</div>
+        </div>
+
+        <div v-show="activeTabIndex === 1" class="section">
+          <div class="section-title">Keyboard Shortcuts</div>
           <div class="row">
             <label class="checkbox">
               <input type="checkbox" v-model="settingsStore.globalShortcutsEnabled" />
               <span>Enable global media shortcuts</span>
             </label>
           </div>
-        </div>
-        <div class="section">
-          <div class="section-title">Keyboard Shortcuts</div>
           <table class="shortcuts">
             <thead>
               <tr>
@@ -128,6 +145,19 @@ function formatShortcut(action: ShortcutAction): string {
             </tbody>
           </table>
         </div>
+
+        <div v-show="activeTabIndex === 2" class="section">
+          <div class="section-title">Playback</div>
+          <div class="row">
+            <label>ReplayGain (placeholder)</label>
+          </div>
+          <div class="row rg-row">
+            <label class="radio"><input type="radio" value="off" v-model="settingsStore.replayGainMode"> Off</label>
+            <label class="radio"><input type="radio" value="track" v-model="settingsStore.replayGainMode"> Track</label>
+            <label class="radio"><input type="radio" value="album" v-model="settingsStore.replayGainMode"> Album</label>
+          </div>
+          <div class="row" style="opacity:.8; font-size:.9em">No effect yet; UI only.</div>
+        </div>
       </div>
 
       <div class="actions">
@@ -176,9 +206,25 @@ function formatShortcut(action: ShortcutAction): string {
   max-height: 60vh;
 }
 
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.tab-btn {
+  padding: 2px 8px;
+  background: var(--secondary-bg);
+  color: var(--text);
+  border: 1px solid var(--border-dark);
+}
+.tab-btn.active { background: var(--bg); }
+
 .section { margin-bottom: 12px; }
 .section-title { font-weight: 600; margin-bottom: 6px; }
 .row { margin: 4px 0; }
+
+/* Better spacing for checkbox label */
+.checkbox { display: inline-flex; align-items: center; gap: 8px; }
+.checkbox input { margin: 0; }
+
+.rg-row { display: flex; gap: 12px; }
+.radio { display: inline-flex; align-items: center; gap: 6px; }
 
 .actions {
   display: flex;

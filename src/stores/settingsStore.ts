@@ -6,6 +6,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const isOpen = ref(false)
   const captureTarget = ref<null | 'playPause' | 'stop' | 'previous' | 'next' | 'random'>(null)
   const globalShortcutsEnabled = ref(true)
+  const replayGainMode = ref<'off' | 'track' | 'album'>('off')
 
   // Defaults
   const shortcuts = ref<ShortcutMap>({
@@ -21,6 +22,10 @@ export const useSettingsStore = defineStore('settings', () => {
     const globalEnabled = localStorage.getItem('tb.globalShortcutsEnabled')
     if (globalEnabled != null) {
       globalShortcutsEnabled.value = globalEnabled === '1' || globalEnabled === 'true'
+    }
+    const rg = localStorage.getItem('tb.replayGainMode')
+    if (rg === 'off' || rg === 'track' || rg === 'album') {
+      replayGainMode.value = rg
     }
     const stored = localStorage.getItem('tb.shortcuts')
     if (stored) {
@@ -50,6 +55,12 @@ export const useSettingsStore = defineStore('settings', () => {
     } catch {}
   })
 
+  watch(replayGainMode, (val) => {
+    try {
+      localStorage.setItem('tb.replayGainMode', val)
+    } catch {}
+  })
+
   function open() {
     isOpen.value = true
   }
@@ -71,5 +82,5 @@ export const useSettingsStore = defineStore('settings', () => {
     shortcuts.value = { ...shortcuts.value, [action]: { ...existing, key: '' } }
   }
 
-  return { isOpen, open, close, shortcuts, captureTarget, beginCapture, assignShortcut, clearShortcut, globalShortcutsEnabled }
+  return { isOpen, open, close, shortcuts, captureTarget, beginCapture, assignShortcut, clearShortcut, globalShortcutsEnabled, replayGainMode }
 })

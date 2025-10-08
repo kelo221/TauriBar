@@ -1,9 +1,12 @@
 ﻿import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 export const usePlaylistStore = defineStore('playlists',
   () => {
+
+    const LAST_SELECTED_KEY = 'tb.lastSelectedSongId'
+    const LAST_PLAYED_KEY = 'tb.lastPlayedSongId'
 
     const currentPlayList = ref<Playlist>({ id: "empty", name: "Empty", songs: [] })
 
@@ -27,7 +30,9 @@ export const usePlaylistStore = defineStore('playlists',
         }
         currentPlayList.value = playlist
         if (playlist.songs.length > 0) {
-          selectedSong.value = playlist.songs[0]
+          const savedId = (() => { try { return localStorage.getItem(LAST_SELECTED_KEY) } catch { return null } })()
+          const match = savedId ? playlist.songs.find(s => s.id === savedId) : undefined
+          selectedSong.value = match ?? playlist.songs[0]
         }
       } catch (e) {
         console.error('Failed to load media files', e)
@@ -56,7 +61,9 @@ export const usePlaylistStore = defineStore('playlists',
         }
         currentPlayList.value = playlist
         if (playlist.songs.length > 0) {
-          selectedSong.value = playlist.songs[0]
+          const savedId = (() => { try { return localStorage.getItem(LAST_SELECTED_KEY) } catch { return null } })()
+          const match = savedId ? playlist.songs.find(s => s.id === savedId) : undefined
+          selectedSong.value = match ?? playlist.songs[0]
         }
       } catch (e) {
         console.error('Failed to load media files from paths', e)
@@ -103,6 +110,12 @@ export const usePlaylistStore = defineStore('playlists',
 
     function setPlaylist(newStats: Playlist) {
       currentPlayList.value = newStats
+      // If no selection yet and we have songs, restore last or pick first
+      if (!selectedSong.value && newStats.songs.length > 0) {
+        const savedId = (() => { try { return localStorage.getItem(LAST_SELECTED_KEY) } catch { return null } })()
+        const match = savedId ? newStats.songs.find(s => s.id === savedId) : undefined
+        selectedSong.value = match ?? newStats.songs[0]
+      }
     }
 
     function setSelectedSong(newSelection: AudioFile) {
@@ -165,6 +178,18 @@ export const usePlaylistStore = defineStore('playlists',
         playSong(next)
       }
     }
+
+    // Persist last selections
+    watch(selectedSong, (song) => {
+      try {
+        if (song && song.id) localStorage.setItem(LAST_SELECTED_KEY, song.id)
+      } catch {}
+    })
+    watch(lastPlayedSongId, (id) => {
+      try {
+        if (id) localStorage.setItem(LAST_PLAYED_KEY, id)
+      } catch {}
+    })
 
     return { currentPlayList, setPlaylist, selectedSong, setSelectedSong, loadFromBackend, loadFromPaths, removeSongsByIds, lastPlayedSongId, playSong, playSelected, playNext, playPrevious, playRandom }
   })

@@ -6,7 +6,7 @@ import PlaylistTabs from "./components/ui/PlaylistTabs.vue";
 import BottomStats from "./components/ui/BottomStats.vue";
 import SearchOverlay from "./components/ui/SearchOverlay.vue";
 import SettingsOverlay from "./components/ui/SettingsOverlay.vue";
-import { onMounted, onBeforeUnmount, onUnmounted, watch, unref } from 'vue';
+import { onMounted, onBeforeUnmount, onUnmounted, watch, unref, nextTick } from 'vue';
 import { usePlaylistStore } from './stores/playlistStore';
 import { useSearchStore } from './stores/searchStore';
 import { useSettingsStore } from './stores/settingsStore';
@@ -85,6 +85,24 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown, { capture: true });
+  // Ensure we have an initial playlist and selection, then optionally auto-play last or first
+  nextTick(async () => {
+    const list = playlistStore.currentPlayList.songs
+    if (!list || list.length === 0) {
+      await playlistStore.loadFromBackend()
+    }
+    const after = playlistStore.currentPlayList.songs
+    if (after && after.length > 0) {
+      // If nothing was ever played, start with selected (restored or first)
+      const selected = (playlistStore as any).selectedSong?.value ?? (playlistStore as any).selectedSong
+      if (selected && selected.id) {
+        // Only auto-play if backend isn't already playing something
+        if (!(playlistStore as any).lastPlayedSongId?.value && !(playlistStore as any).lastPlayedSongId) {
+          playlistStore.playSelected()
+        }
+      }
+    }
+  })
 });
 
 onBeforeUnmount(() => {

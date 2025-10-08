@@ -1,7 +1,7 @@
-# Tauri + Vue + TypeScript
+# Tauribar
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Tauribar is vibecoded music player inspired by foobar2000, primary made for my personal use, but might as well share it here.
+<img width="533" height="1119" alt="image" src="https://github.com/user-attachments/assets/50a032ee-4c9d-4049-b99d-35f64a1bcd14" />
 
-## Recommended IDE Setup
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+Icons are made by [Microsoft](https://github.com/microsoft/fluentui-emoji) under MIT licence.

@@ -2,8 +2,10 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { comboToString, eventToCombo } from '../../utils/keyboard'
+import { useAppStore } from '../../stores/appStore'
 
 const settingsStore = useSettingsStore()
+const appStore = useAppStore()
 
 type ShortcutAction = 'playPause' | 'stop' | 'previous' | 'next' | 'random'
 
@@ -161,6 +163,7 @@ function formatShortcut(action: ShortcutAction): string {
       </div>
 
       <div class="actions">
+        <div class="app-info">{{ appStore.displayNameAndVersion }}</div>
         <button class="btn" @click="close">Close</button>
       </div>
     </div>
@@ -229,7 +232,7 @@ function formatShortcut(action: ShortcutAction): string {
 .actions {
   display: flex;
   gap: 6px;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-top: 8px;
 }
 
@@ -239,6 +242,8 @@ function formatShortcut(action: ShortcutAction): string {
   color: var(--text);
   border: 1px solid var(--border-dark);
 }
+
+.app-info { font-size: 0.85rem; opacity: 0.9; align-self: center; }
 
 /* Shortcuts table */
 .shortcuts {
